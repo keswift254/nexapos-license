@@ -15,6 +15,19 @@ CREATE TABLE IF NOT EXISTS license_keys (
     activated_at TIMESTAMP NULL,
     device_id VARCHAR(64) NULL,
     activation_token_hash CHAR(64) NULL UNIQUE,
+    -- How long the license itself stays valid once activated - chosen
+    -- by the vendor at issue time (NULL = never expires, the original
+    -- behavior). The countdown starts at activation, not issue, so a
+    -- code sitting unredeemed doesn't burn into it - see valid_until.
+    valid_days INT NULL,
+    -- Computed once at activation as activated_at + valid_days, NULL if
+    -- valid_days was NULL. Cached on the app itself (see
+    -- nexapos_mobile's LicenseService) so it can be enforced fully
+    -- offline using only the device's own clock - deliberately not
+    -- something the app needs to be online to find out about, since the
+    -- whole point is deactivating even if it never reaches this server
+    -- again after activation.
+    valid_until TIMESTAMP NULL,
     revoked TINYINT(1) NOT NULL DEFAULT 0,
     revoked_at TIMESTAMP NULL,
     INDEX (device_id)

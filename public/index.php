@@ -131,6 +131,9 @@ if ($action === 'list_leads' && $method === 'GET') {
  * 1 minute..7 days so a fat-fingered value can't create a code that
  * lingers unactivated for months, working against the "not a permanent
  * growing database" design (see schema.sql's comment on license_keys).
+ * license_duration_days is a separate thing entirely - how long the
+ * license stays valid AFTER activation (see valid_days/valid_until in
+ * schema.sql) - omitted/0 means it never expires.
  */
 if ($action === 'issue' && $method === 'POST') {
     requireAdmin($licenseConfig);
@@ -141,24 +144,34 @@ if ($action === 'issue' && $method === 'POST') {
         : (int) $licenseConfig['key_expiry_minutes'];
     $expiryMinutes = max(1, min($expiryMinutes, 10080));
 
+    $validDays = isset($body['license_duration_days']) && $body['license_duration_days'] !== ''
+        ? (int) $body['license_duration_days']
+        : null;
+    if ($validDays !== null && $validDays < 1) {
+        $validDays = null;
+    }
+
     $code = LicenseCode::generate($pdo);
-    $insert = $pdo->prepare('INSERT INTO license_keys (code, expires_at) VALUES (?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? MINUTE))');
-    $insert->execute([$code, $expiryMinutes]);
+    $insert = $pdo->prepare('INSERT INTO license_keys (code, expires_at, valid_days) VALUES (?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? MINUTE), ?)');
+    $insert->execute([$code, $expiryMinutes, $validDays]);
 
-    $expiresAt = $pdo->prepare('SELECT expires_at FROM license_keys WHERE code = ?');
-    $expiresAt->execute([$code]);
+    $issued = $pdo->prepare('SELECT expires_at FROM license_keys WHERE code = ?');
+    $issued->execute([$code]);
 
-    jsonResponse(['success' => true, 'code' => $code, 'expires_at' => $expiresAt->fetchColumn()]);
+    jsonResponse(['success' => true, 'code' => $code, 'expires_at' => $issued->fetchColumn(), 'valid_days' => $validDays]);
 }
 
 /**
- * The app calls this once, the first time a key is entered. Atomic
- * claim (single UPDATE with the ownership check built into its WHERE
- * clause) so two devices racing to redeem the same code can never both
- * win - matches join_shop's same pattern in nexapos_platform. Allowing
- * device_id to already equal the caller's own is what makes this
- * idempotent (a reinstall on the same device just gets a fresh token,
- * rather than being told the code is "already used").
+ * The app calls this once, the first time a key is entered. One-time
+ * use, full stop - not even the same device that already claimed it
+ * can redeem it again. A legitimate reinstall needs a fresh code from
+ * the vendor, same as any other support request in this manually-run
+ * model. Atomic claim (single UPDATE with the ownership check built
+ * into its WHERE clause) so two requests racing for the same
+ * still-unclaimed code can never both win - matches join_shop's same
+ * pattern in nexapos_platform; the upfront SELECT-based checks below
+ * exist only to give a precise error message in the common case, not
+ * to guard the race (the UPDATE's own WHERE clause does that).
  */
 if ($action === 'activate' && $method === 'POST') {
     $body = requestBody();
@@ -177,8 +190,8 @@ if ($action === 'activate' && $method === 'POST') {
     if ((int) $row['revoked'] === 1) {
         jsonResponse(['success' => false, 'message' => 'This license key has been revoked.'], 422);
     }
-    if ($row['device_id'] !== null && $row['device_id'] !== $deviceId) {
-        jsonResponse(['success' => false, 'message' => 'This license key is already activated on another device.'], 422);
+    if ($row['device_id'] !== null) {
+        jsonResponse(['success' => false, 'message' => 'This license key has already been used.'], 422);
     }
     // ' UTC' is load-bearing: license_keys.expires_at is written via
     // MySQL's UTC_TIMESTAMP(), but this server's PHP default timezone is
@@ -187,18 +200,23 @@ if ($action === 'activate' && $method === 'POST') {
     // time, shifting the computed epoch hours off and making a freshly
     // issued code appear expired immediately. Confirmed by testing, not
     // guessed - this exact bug fired on the very first activate() call.
-    if ($row['device_id'] === null && strtotime((string) $row['expires_at'] . ' UTC') < time()) {
+    if (strtotime((string) $row['expires_at'] . ' UTC') < time()) {
         jsonResponse(['success' => false, 'message' => 'This license key has expired. Ask for a new one.'], 422);
     }
 
     $claim = $pdo->prepare('
         UPDATE license_keys
         SET device_id = ?, activated_at = UTC_TIMESTAMP()
-        WHERE code = ? AND revoked = 0 AND (device_id = ? OR (device_id IS NULL AND expires_at > UTC_TIMESTAMP()))
+        WHERE code = ? AND revoked = 0 AND device_id IS NULL AND expires_at > UTC_TIMESTAMP()
     ');
-    $claim->execute([$deviceId, $code, $deviceId]);
+    $claim->execute([$deviceId, $code]);
     if ($claim->rowCount() !== 1) {
-        jsonResponse(['success' => false, 'message' => 'Could not activate this license key. It may have just been claimed by another device.'], 409);
+        jsonResponse(['success' => false, 'message' => 'Could not activate this license key. It may have just been claimed by someone else.'], 409);
+    }
+
+    if ($row['valid_days'] !== null) {
+        $pdo->prepare('UPDATE license_keys SET valid_until = DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? DAY) WHERE code = ?')
+            ->execute([(int) $row['valid_days'], $code]);
     }
 
     $activationToken = bin2hex(random_bytes(32));
@@ -206,15 +224,22 @@ if ($action === 'activate' && $method === 'POST') {
     $store = $pdo->prepare('UPDATE license_keys SET activation_token_hash = ? WHERE code = ?');
     $store->execute([$tokenHash, $code]);
 
-    jsonResponse(['success' => true, 'activation_token' => $activationToken]);
+    $final = $pdo->prepare('SELECT valid_until FROM license_keys WHERE code = ?');
+    $final->execute([$code]);
+
+    jsonResponse(['success' => true, 'activation_token' => $activationToken, 'valid_until' => $final->fetchColumn()]);
 }
 
 /**
  * Called once at activation to cache locally, then again only whenever
  * the app happens to have internet - a background health check, never
- * something checkout blocks on. "valid: false" means revoked; anything
- * else (unreachable, timeout) the app already treats as "couldn't check,
- * keep running" on the caller's side, not this endpoint's concern.
+ * something checkout blocks on. "valid: false" means revoked OR past
+ * valid_until; anything else (unreachable, timeout) the app already
+ * treats as "couldn't check, keep running" on the caller's side, not
+ * this endpoint's concern. valid_until is echoed back so the app can
+ * refresh its own cached copy - the actual offline enforcement of it
+ * happens client-side using the device's own clock, not by requiring
+ * this endpoint to be reachable (see LicenseService.hasCachedLicense).
  */
 if ($action === 'verify' && $method === 'POST') {
     $token = trim(headerValue('Authorization'));
@@ -225,13 +250,17 @@ if ($action === 'verify' && $method === 'POST') {
         jsonResponse(['success' => false, 'valid' => false, 'message' => 'Missing activation token.'], 401);
     }
 
-    $stmt = $pdo->prepare('SELECT revoked FROM license_keys WHERE activation_token_hash = ?');
+    $stmt = $pdo->prepare('SELECT revoked, valid_until FROM license_keys WHERE activation_token_hash = ?');
     $stmt->execute([hash('sha256', $token)]);
     $row = $stmt->fetch();
     if (!$row) {
         jsonResponse(['success' => true, 'valid' => false]);
     }
-    jsonResponse(['success' => true, 'valid' => (int) $row['revoked'] === 0]);
+
+    // Same ' UTC' timezone gotcha as activate()'s expiry check above.
+    $expired = $row['valid_until'] !== null && strtotime((string) $row['valid_until'] . ' UTC') < time();
+    $valid = (int) $row['revoked'] === 0 && !$expired;
+    jsonResponse(['success' => true, 'valid' => $valid, 'valid_until' => $row['valid_until']]);
 }
 
 /** Admin action - the seller revoking a key after a refund/chargeback. */
