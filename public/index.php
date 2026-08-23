@@ -37,32 +37,56 @@ function requestBody(): array
 /**
  * Inline-styled on purpose - email clients (Outlook desktop especially)
  * ignore <style> blocks and external stylesheets, so anything not
- * inlined simply won't render. Kept deliberately simple (no flexbox/
- * grid, which old Outlook's Word rendering engine doesn't support) -
- * plain divs, padding, and one button. htmlspecialchars on $name since
- * it's user-submitted and this renders as real HTML, unlike the plain-
- * text fallback right next to every call site.
+ * inlined simply won't render. Numbered steps use a <table> rather than
+ * flexbox/grid, which old Outlook's Word rendering engine doesn't
+ * support - tables are the one layout primitive every email client
+ * still renders correctly. Palette matches nexapos-site/index.html's
+ * CSS variables exactly (--accent #4f46e5, --accent-dark #3730a3,
+ * --accent-soft #eef2ff, --bg #f7f7fb, --ink #14141f, --ink-soft
+ * #55556b) so the email reads as the same product as the site, not a
+ * different one - user asked for this explicitly after the first
+ * version leaned mostly gray/white with just one blue button.
+ * htmlspecialchars on $name since it's user-submitted and this renders
+ * as real HTML, unlike the plain-text fallback right next to every
+ * call site.
  */
 function welcomeEmailHtml(string $name): string
 {
     $safeName = htmlspecialchars($name, ENT_QUOTES);
-    return <<<HTML
-    <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 480px; margin: 0 auto; background: #f5f5f7; padding: 32px 20px;">
-      <div style="background: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
-        <div style="text-align: center; margin-bottom: 20px;">
-          <div style="width: 48px; height: 48px; background: #4f46e5; border-radius: 12px; display: inline-block; color: #ffffff; font-size: 22px; font-weight: 700; line-height: 48px; text-align: center;">N</div>
-        </div>
-        <h1 style="font-size: 22px; text-align: center; margin: 0 0 8px; color: #1a1a1a;">Welcome to NexaPOS, {$safeName}!</h1>
-        <p style="text-align: center; color: #666666; font-size: 14px; margin: 0 0 28px;">Offline-first point of sale for your business.</p>
+    $steps = [
+        'Download the app for your device',
+        "Install it and open it - you'll land on an activation screen",
+        'Message us to arrange payment',
+        "We'll send your license key - enter it once, no internet needed after that",
+    ];
+    $stepsHtml = '';
+    foreach ($steps as $i => $step) {
+        $n = $i + 1;
+        $stepsHtml .= <<<HTML
+        <tr>
+          <td style="width: 26px; vertical-align: top; padding-bottom: 12px;">
+            <div style="width: 20px; height: 20px; background: #4f46e5; border-radius: 50%; color: #ffffff; font-size: 12px; font-weight: 700; line-height: 20px; text-align: center;">{$n}</div>
+          </td>
+          <td style="padding-left: 10px; padding-bottom: 12px; color: #14141f; font-size: 14px;">{$step}</td>
+        </tr>
+        HTML;
+    }
 
-        <div style="background: #f8f8fb; border-radius: 10px; padding: 20px; margin-bottom: 24px;">
-          <p style="margin: 0 0 12px; font-weight: 600; font-size: 14px; color: #1a1a1a;">Next steps</p>
-          <ol style="margin: 0; padding-left: 20px; color: #444444; font-size: 14px; line-height: 1.7;">
-            <li>Download the app for your device</li>
-            <li>Install it and open it - you'll land on an activation screen</li>
-            <li>Message us to arrange payment</li>
-            <li>We'll send your license key - enter it once and you're set, no internet needed after that</li>
-          </ol>
+    return <<<HTML
+    <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 480px; margin: 0 auto; background: #f7f7fb;">
+      <div style="background: #4f46e5; padding: 28px 20px; text-align: center; border-radius: 12px 12px 0 0;">
+        <div style="width: 44px; height: 44px; background: #ffffff; border-radius: 12px; display: inline-block; color: #4f46e5; font-size: 20px; font-weight: 700; line-height: 44px; text-align: center; margin-bottom: 10px;">N</div>
+        <div style="color: #ffffff; font-size: 17px; font-weight: 700;">NexaPOS</div>
+      </div>
+      <div style="background: #ffffff; padding: 32px 24px; border-radius: 0 0 12px 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+        <h1 style="font-size: 22px; text-align: center; margin: 0 0 8px; color: #14141f;">Welcome, {$safeName}!</h1>
+        <p style="text-align: center; color: #55556b; font-size: 14px; margin: 0 0 28px;">Offline-first point of sale for your business.</p>
+
+        <div style="background: #eef2ff; border: 1px solid #e6e6f0; border-radius: 10px; padding: 20px; margin-bottom: 24px;">
+          <p style="margin: 0 0 14px; font-weight: 600; font-size: 14px; color: #3730a3;">Next steps</p>
+          <table role="presentation" style="width: 100%; border-collapse: collapse;">
+            {$stepsHtml}
+          </table>
         </div>
 
         <div style="text-align: center; margin-bottom: 12px;">
@@ -74,7 +98,7 @@ function welcomeEmailHtml(string $name): string
 
         <p style="text-align: center; color: #999999; font-size: 12px; margin: 28px 0 0;">Questions? Just reply to this email or message us on WhatsApp.</p>
       </div>
-      <p style="text-align: center; color: #999999; font-size: 12px; margin-top: 16px;">&copy; 2026 NexaPOS</p>
+      <p style="text-align: center; color: #55556b; font-size: 12px; margin: 16px 0 0;">&copy; 2026 NexaPOS</p>
     </div>
     HTML;
 }
