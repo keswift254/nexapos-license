@@ -19,3 +19,19 @@ CREATE TABLE IF NOT EXISTS license_keys (
     revoked_at TIMESTAMP NULL,
     INDEX (device_id)
 );
+
+-- Registrations from the marketing/download site - a lead, not a
+-- customer yet. Purchase + key issuance still happen manually (the
+-- vendor runs the key generator after payment clears, see
+-- license_keys' own comment above) - this table exists purely so the
+-- vendor knows who downloaded the app and how to follow up, not to gate
+-- the download itself.
+CREATE TABLE IF NOT EXISTS leads (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(160) NOT NULL,
+    email VARCHAR(190) NOT NULL,
+    business_name VARCHAR(160) NULL,
+    phone VARCHAR(40) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX (email)
+);

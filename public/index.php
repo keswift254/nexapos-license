@@ -74,11 +74,51 @@ $licenseConfig = require __DIR__ . '/../config/license.php';
 $action = (string) ($_GET['action'] ?? '');
 $method = $_SERVER['REQUEST_METHOD'];
 
+// register_lead is the only action a browser calls cross-origin (from
+// the registration site, a different host) - activate/verify come from
+// the Flutter app (not subject to CORS) and issue/revoke/list_leads
+// require the admin secret regardless of origin, so a permissive
+// header here doesn't expose anything a stolen header wouldn't already.
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Admin-Secret');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+if ($method === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
 // Render's health check hits this - deliberately goes through
 // Database::connection() above rather than skipping it, so a deploy
 // only reports healthy once the DB is actually reachable, not just PHP.
 if ($action === 'health' && $method === 'GET') {
     jsonResponse(['success' => true, 'service' => 'nexapos_license']);
+}
+
+/**
+ * Public registration from the marketing/download site - a lead, not a
+ * gate. See leads' own schema comment: purchase and key issuance stay
+ * manual, this just tells the vendor who downloaded and how to follow
+ * up with them.
+ */
+if ($action === 'register_lead' && $method === 'POST') {
+    $body = requestBody();
+    $name = trim((string) ($body['name'] ?? ''));
+    $email = trim((string) ($body['email'] ?? ''));
+    $businessName = trim((string) ($body['business_name'] ?? ''));
+    $phone = trim((string) ($body['phone'] ?? ''));
+    if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        jsonResponse(['success' => false, 'message' => 'A valid name and email are required.'], 422);
+    }
+    $insert = $pdo->prepare('INSERT INTO leads (name, email, business_name, phone) VALUES (?, ?, ?, ?)');
+    $insert->execute([$name, $email, $businessName !== '' ? $businessName : null, $phone !== '' ? $phone : null]);
+    jsonResponse(['success' => true]);
+}
+
+/** Admin action - see who has registered so far. */
+if ($action === 'list_leads' && $method === 'GET') {
+    requireAdmin($licenseConfig);
+    $rows = $pdo->query('SELECT id, name, email, business_name, phone, created_at FROM leads ORDER BY id DESC')->fetchAll();
+    jsonResponse(['success' => true, 'leads' => $rows]);
 }
 
 /**
