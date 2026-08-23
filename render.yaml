@@ -27,3 +27,18 @@ services:
         value: /etc/secrets/db-ca.pem
       - key: LICENSE_ADMIN_SECRET
         sync: false
+      # --- Registration-notification email (app/Services/Mailer.php) -
+      # optional; register_lead just logs and moves on if these are
+      # unset. See the deploy notes for the current provider choice. ---
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: NOTIFY_EMAIL
+        value: condojuniur@outlook.com

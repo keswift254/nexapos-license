@@ -15,6 +15,7 @@ spl_autoload_register(function (string $class): void {
 
 use License\Core\Database;
 use License\Core\LicenseCode;
+use License\Services\Mailer;
 
 function jsonResponse(array $payload, int $status = 200): void
 {
@@ -111,6 +112,22 @@ if ($action === 'register_lead' && $method === 'POST') {
     }
     $insert = $pdo->prepare('INSERT INTO leads (name, email, business_name, phone) VALUES (?, ?, ?, ?)');
     $insert->execute([$name, $email, $businessName !== '' ? $businessName : null, $phone !== '' ? $phone : null]);
+
+    // The lead is already saved above - a mail failure (unconfigured
+    // SMTP, a bad password, the server being unreachable) must never
+    // turn into a failed registration response for the customer.
+    try {
+        $mailer = new Mailer($licenseConfig);
+        $mailer->send(
+            (string) $licenseConfig['notify_email'],
+            "New NexaPOS registration: $name",
+            "Name: $name\nEmail: $email\nBusiness: " . ($businessName !== '' ? $businessName : '-') .
+                "\nPhone: " . ($phone !== '' ? $phone : '-') . "\n\nRegistered at (UTC): " . gmdate('Y-m-d H:i:s')
+        );
+    } catch (\Throwable $e) {
+        error_log('[nexapos_license] Could not send registration notification: ' . $e->getMessage());
+    }
+
     jsonResponse(['success' => true]);
 }
 
