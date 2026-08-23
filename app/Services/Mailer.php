@@ -27,7 +27,12 @@ class Mailer
         $this->fromName = (string) ($config['mail_from_name'] ?? 'NexaPOS');
     }
 
-    public function send(string $toEmail, string $subject, string $body): void
+    /**
+     * $htmlBody is optional - when given, mail clients that render HTML
+     * show it instead of $textBody, which then only serves as the
+     * fallback (some clients, spam filters, and previews still read it).
+     */
+    public function send(string $toEmail, string $subject, string $textBody, ?string $htmlBody = null): void
     {
         if ($this->apiKey === '' || $this->fromEmail === '') {
             throw new \RuntimeException('Mail is not configured (BREVO_API_KEY/MAIL_FROM).');
@@ -37,8 +42,11 @@ class Mailer
             'sender' => ['name' => $this->fromName, 'email' => $this->fromEmail],
             'to' => [['email' => $toEmail]],
             'subject' => $subject,
-            'textContent' => $body,
+            'textContent' => $textBody,
         ];
+        if ($htmlBody !== null) {
+            $payload['htmlContent'] = $htmlBody;
+        }
 
         $ch = curl_init('https://api.brevo.com/v3/smtp/email');
         curl_setopt_array($ch, [

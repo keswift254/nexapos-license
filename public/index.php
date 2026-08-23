@@ -35,6 +35,51 @@ function requestBody(): array
 }
 
 /**
+ * Inline-styled on purpose - email clients (Outlook desktop especially)
+ * ignore <style> blocks and external stylesheets, so anything not
+ * inlined simply won't render. Kept deliberately simple (no flexbox/
+ * grid, which old Outlook's Word rendering engine doesn't support) -
+ * plain divs, padding, and one button. htmlspecialchars on $name since
+ * it's user-submitted and this renders as real HTML, unlike the plain-
+ * text fallback right next to every call site.
+ */
+function welcomeEmailHtml(string $name): string
+{
+    $safeName = htmlspecialchars($name, ENT_QUOTES);
+    return <<<HTML
+    <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 480px; margin: 0 auto; background: #f5f5f7; padding: 32px 20px;">
+      <div style="background: #ffffff; border-radius: 12px; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <div style="width: 48px; height: 48px; background: #4f46e5; border-radius: 12px; display: inline-block; color: #ffffff; font-size: 22px; font-weight: 700; line-height: 48px; text-align: center;">N</div>
+        </div>
+        <h1 style="font-size: 22px; text-align: center; margin: 0 0 8px; color: #1a1a1a;">Welcome to NexaPOS, {$safeName}!</h1>
+        <p style="text-align: center; color: #666666; font-size: 14px; margin: 0 0 28px;">Offline-first point of sale for your business.</p>
+
+        <div style="background: #f8f8fb; border-radius: 10px; padding: 20px; margin-bottom: 24px;">
+          <p style="margin: 0 0 12px; font-weight: 600; font-size: 14px; color: #1a1a1a;">Next steps</p>
+          <ol style="margin: 0; padding-left: 20px; color: #444444; font-size: 14px; line-height: 1.7;">
+            <li>Download the app for your device</li>
+            <li>Install it and open it - you'll land on an activation screen</li>
+            <li>Message us to arrange payment</li>
+            <li>We'll send your license key - enter it once and you're set, no internet needed after that</li>
+          </ol>
+        </div>
+
+        <div style="text-align: center; margin-bottom: 12px;">
+          <a href="https://keswift254.github.io/nexapos-site/#get-started" style="display: inline-block; background: #4f46e5; color: #ffffff; text-decoration: none; padding: 13px 28px; border-radius: 8px; font-size: 14px; font-weight: 600;">Download NexaPOS</a>
+        </div>
+        <div style="text-align: center;">
+          <a href="https://wa.me/message/M5SGWZ664XJ4C1" style="display: inline-block; background: #25D366; color: #ffffff; text-decoration: none; padding: 13px 28px; border-radius: 8px; font-size: 14px; font-weight: 600;">Chat on WhatsApp</a>
+        </div>
+
+        <p style="text-align: center; color: #999999; font-size: 12px; margin: 28px 0 0;">Questions? Just reply to this email or message us on WhatsApp.</p>
+      </div>
+      <p style="text-align: center; color: #999999; font-size: 12px; margin-top: 16px;">&copy; 2026 NexaPOS</p>
+    </div>
+    HTML;
+}
+
+/**
  * Same case-insensitive-header gotcha nexapos_platform's Auth class
  * already hit and documented: $_SERVER['HTTP_AUTHORIZATION'] is unset
  * under some Apache/PHP configs, and a literal getallheaders() lookup
@@ -153,7 +198,8 @@ if ($action === 'register_lead' && $method === 'POST') {
                 "3. Reply to this email or message us on WhatsApp to arrange payment: https://wa.me/message/M5SGWZ664XJ4C1\n" .
                 "4. We'll generate your license key and send it over - enter it once, and the app runs fully offline after that, no internet needed.\n\n" .
                 "Questions? Just reply to this email or message us on WhatsApp.\n\n" .
-                '- The NexaPOS team'
+                '- The NexaPOS team',
+            welcomeEmailHtml($name)
         );
     } catch (\Throwable $e) {
         error_log('[nexapos_license] Could not send welcome email: ' . $e->getMessage());
