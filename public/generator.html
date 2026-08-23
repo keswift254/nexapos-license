@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NexaPOS Key Generator</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    max-width: 480px;
+    margin: 40px auto;
+    padding: 0 20px;
+    background: #f5f5f7;
+    color: #1a1a1a;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  p.sub { color: #666; font-size: 13px; margin-top: 0; }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 12px;
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: #4f46e5;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.danger { background: #dc2626; }
+  .result {
+    text-align: center;
+    padding: 16px;
+    margin-top: 12px;
+    border-radius: 8px;
+    background: #eef2ff;
+    display: none;
+  }
+  .result.show { display: block; }
+  .code {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    font-family: monospace;
+  }
+  .timer { font-size: 13px; color: #666; margin-top: 4px; }
+  .msg { font-size: 13px; margin-top: 10px; padding: 10px; border-radius: 8px; display: none; }
+  .msg.show { display: block; }
+  .msg.ok { background: #dcfce7; color: #166534; }
+  .msg.err { background: #fee2e2; color: #991b1b; }
+</style>
+</head>
+<body>
+  <h1>NexaPOS Key Generator</h1>
+  <p class="sub">Run this after a customer pays. The code is redeemable for a limited window and locks to whichever device activates it first.</p>
+
+  <div class="card">
+    <label for="serverUrl">License server address</label>
+    <input id="serverUrl" value="http://localhost/nexapos_license/public/index.php">
+    <label for="adminSecret">Admin secret</label>
+    <input id="adminSecret" type="password" placeholder="paste your admin_secret here">
+    <button id="generateBtn" onclick="generateKey()">Generate key</button>
+    <div class="result" id="result">
+      <div class="code" id="codeText"></div>
+      <div class="timer" id="timerText"></div>
+    </div>
+    <div class="msg" id="generateMsg"></div>
+  </div>
+
+  <div class="card">
+    <label for="revokeCode">Revoke a key (e.g. after a refund)</label>
+    <input id="revokeCode" placeholder="the code to revoke">
+    <button class="danger" onclick="revokeKey()">Revoke</button>
+    <div class="msg" id="revokeMsg"></div>
+  </div>
+
+<script>
+let countdownInterval = null;
+
+function serverUrl() {
+  return document.getElementById('serverUrl').value.trim();
+}
+function adminSecret() {
+  return document.getElementById('adminSecret').value.trim();
+}
+function showMsg(id, text, ok) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'msg show ' + (ok ? 'ok' : 'err');
+}
+
+async function generateKey() {
+  const btn = document.getElementById('generateBtn');
+  btn.disabled = true;
+  document.getElementById('generateMsg').className = 'msg';
+  try {
+    const res = await fetch(serverUrl() + '?action=issue', {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': adminSecret() },
+    });
+    const data = await res.json();
+    if (!data.success) {
+      showMsg('generateMsg', data.message || 'Could not generate a key.', false);
+      document.getElementById('result').className = 'result';
+      return;
+    }
+    document.getElementById('codeText').textContent = data.code;
+    document.getElementById('result').className = 'result show';
+    startCountdown(data.expires_at);
+  } catch (e) {
+    showMsg('generateMsg', 'Could not reach the license server: ' + e, false);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function startCountdown(expiresAtUtc) {
+  if (countdownInterval) clearInterval(countdownInterval);
+  const expiry = new Date(expiresAtUtc.replace(' ', 'T') + 'Z').getTime();
+  const tick = () => {
+    const remaining = Math.max(0, Math.floor((expiry - Date.now()) / 1000));
+    const m = Math.floor(remaining / 60);
+    const s = remaining % 60;
+    const timerEl = document.getElementById('timerText');
+    if (remaining <= 0) {
+      timerEl.textContent = 'Expired - generate a new one if the customer hasn\'t activated yet.';
+      clearInterval(countdownInterval);
+    } else {
+      timerEl.textContent = `Expires in ${m}m ${s.toString().padStart(2, '0')}s`;
+    }
+  };
+  tick();
+  countdownInterval = setInterval(tick, 1000);
+}
+
+async function revokeKey() {
+  const code = document.getElementById('revokeCode').value.trim();
+  if (!code) return;
+  document.getElementById('revokeMsg').className = 'msg';
+  try {
+    const res = await fetch(serverUrl() + '?action=revoke', {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const data = await res.json();
+    if (data.success && data.revoked) {
+      showMsg('revokeMsg', 'Revoked.', true);
+    } else {
+      showMsg('revokeMsg', data.message || 'That code was not found.', false);
+    }
+  } catch (e) {
+    showMsg('revokeMsg', 'Could not reach the license server: ' + e, false);
+  }
+}
+</script>
+</body>
+</html>

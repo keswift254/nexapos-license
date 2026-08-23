@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: nexapos-license
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /index.php?action=health
+    envVars:
+      # --- Aiven MySQL connection - fill in from the Aiven console.
+      # Can point at the SAME Aiven service as nexapos_platform (just a
+      # different DB_NAME) - Aiven's free tier is one service with room
+      # for multiple databases on it, not one service per database. ---
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_NAME
+        value: nexapos_license
+      - key: DB_USER
+        sync: false
+      - key: DB_PASS
+        sync: false
+      # Path to a Secret File (Render dashboard > Environment > Secret
+      # Files) holding Aiven's CA certificate - not committed to git,
+      # not baked into the image, so it can be rotated without a rebuild.
+      - key: DB_SSL_CA
+        value: /etc/secrets/db-ca.pem
+      - key: LICENSE_ADMIN_SECRET
+        sync: false
