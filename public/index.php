@@ -110,12 +110,25 @@ if ($action === 'register_lead' && $method === 'POST') {
     if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         jsonResponse(['success' => false, 'message' => 'A valid name and email are required.'], 422);
     }
-    $insert = $pdo->prepare('INSERT INTO leads (name, email, business_name, phone) VALUES (?, ?, ?, ?)');
-    $insert->execute([$name, $email, $businessName !== '' ? $businessName : null, $phone !== '' ? $phone : null]);
+
+    // leads.email is UNIQUE - catching the constraint violation is the
+    // atomic version of this check (no separate SELECT-then-INSERT race
+    // between two near-simultaneous submissions of the same address).
+    try {
+        $insert = $pdo->prepare('INSERT INTO leads (name, email, business_name, phone) VALUES (?, ?, ?, ?)');
+        $insert->execute([$name, $email, $businessName !== '' ? $businessName : null, $phone !== '' ? $phone : null]);
+    } catch (\PDOException $e) {
+        if ((int) $e->getCode() === 23000) {
+            jsonResponse(['success' => false, 'message' => 'This email is already registered. Check your inbox, or contact us on WhatsApp if you need help.'], 409);
+        }
+        throw $e;
+    }
 
     // The lead is already saved above - a mail failure (unconfigured
     // SMTP, a bad password, the server being unreachable) must never
-    // turn into a failed registration response for the customer.
+    // turn into a failed registration response for the customer. Two
+    // separate sends (vendor notification + customer welcome) so one
+    // failing doesn't take the other down with it.
     try {
         $mailer = new Mailer($licenseConfig);
         $mailer->send(
@@ -126,6 +139,24 @@ if ($action === 'register_lead' && $method === 'POST') {
         );
     } catch (\Throwable $e) {
         error_log('[nexapos_license] Could not send registration notification: ' . $e->getMessage());
+    }
+    try {
+        $mailer = new Mailer($licenseConfig);
+        $mailer->send(
+            $email,
+            'Welcome to NexaPOS - next steps',
+            "Hi $name,\n\n" .
+                "Thanks for registering for NexaPOS - offline-first point of sale for your business.\n\n" .
+                "Next steps:\n" .
+                "1. Download the app for your device: https://keswift254.github.io/nexapos-site/#get-started\n" .
+                "2. Install it and open it - you'll land on an activation screen.\n" .
+                "3. Reply to this email or message us on WhatsApp to arrange payment: https://wa.me/message/M5SGWZ664XJ4C1\n" .
+                "4. We'll generate your license key and send it over - enter it once, and the app runs fully offline after that, no internet needed.\n\n" .
+                "Questions? Just reply to this email or message us on WhatsApp.\n\n" .
+                '- The NexaPOS team'
+        );
+    } catch (\Throwable $e) {
+        error_log('[nexapos_license] Could not send welcome email: ' . $e->getMessage());
     }
 
     jsonResponse(['success' => true]);

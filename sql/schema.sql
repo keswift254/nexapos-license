@@ -39,12 +39,14 @@ CREATE TABLE IF NOT EXISTS license_keys (
 -- license_keys' own comment above) - this table exists purely so the
 -- vendor knows who downloaded the app and how to follow up, not to gate
 -- the download itself.
+-- email is UNIQUE so a second registration attempt with the same
+-- address is a clean, atomic duplicate rejection (catch the constraint
+-- violation in register_lead) rather than a check-then-insert race.
 CREATE TABLE IF NOT EXISTS leads (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(160) NOT NULL,
-    email VARCHAR(190) NOT NULL,
+    email VARCHAR(190) NOT NULL UNIQUE,
     business_name VARCHAR(160) NULL,
     phone VARCHAR(40) NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX (email)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
