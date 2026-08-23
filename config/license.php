@@ -14,13 +14,14 @@ $config = [
     // Registration-notification email (see app/Services/Mailer.php) -
     // all optional; register_lead just logs and moves on if unset or if
     // sending fails, since a lead is already saved by the time this
-    // runs and must never be lost over a mail hiccup.
-    'smtp_host' => getenv('SMTP_HOST') ?: '',
-    'smtp_port' => (int) (getenv('SMTP_PORT') ?: 587),
-    'smtp_user' => getenv('SMTP_USER') ?: '',
-    'smtp_pass' => getenv('SMTP_PASS') ?: '',
-    'smtp_from' => getenv('SMTP_FROM') ?: '',
-    'smtp_from_name' => getenv('SMTP_FROM_NAME') ?: 'NexaPOS',
+    // runs and must never be lost over a mail hiccup. Brevo's HTTP API,
+    // not raw SMTP - Render blocks outbound SMTP ports entirely on free
+    // web services, confirmed via a real "Connection timed out" in
+    // production after the SMTP version was actually configured and
+    // deployed.
+    'brevo_api_key' => getenv('BREVO_API_KEY') ?: '',
+    'mail_from' => getenv('MAIL_FROM') ?: '',
+    'mail_from_name' => getenv('MAIL_FROM_NAME') ?: 'NexaPOS',
     'notify_email' => getenv('NOTIFY_EMAIL') ?: 'condojuniur@outlook.com',
 ];
 

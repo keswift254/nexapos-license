@@ -28,17 +28,12 @@ services:
       - key: LICENSE_ADMIN_SECRET
         sync: false
       # --- Registration-notification email (app/Services/Mailer.php) -
-      # optional; register_lead just logs and moves on if these are
-      # unset. See the deploy notes for the current provider choice. ---
-      - key: SMTP_HOST
+      # Brevo's HTTP API, not SMTP (Render blocks outbound SMTP ports on
+      # free web services - confirmed, not assumed). All optional;
+      # register_lead just logs and moves on if these are unset. ---
+      - key: BREVO_API_KEY
         sync: false
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASS
-        sync: false
-      - key: SMTP_FROM
+      - key: MAIL_FROM
         sync: false
       - key: NOTIFY_EMAIL
         value: condojuniur@outlook.com
