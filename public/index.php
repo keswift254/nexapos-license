@@ -126,12 +126,22 @@ if ($action === 'list_leads' && $method === 'GET') {
  * this - once per sale, right after payment clears. Deliberately no
  * customer-identifying info accepted or stored here (see schema.sql's
  * comment) - just "a key now exists, redeemable for the next N minutes".
+ * expiry_minutes is optional per-call override of the config default
+ * (e.g. a longer window for "I'll install it tomorrow") - clamped to
+ * 1 minute..7 days so a fat-fingered value can't create a code that
+ * lingers unactivated for months, working against the "not a permanent
+ * growing database" design (see schema.sql's comment on license_keys).
  */
 if ($action === 'issue' && $method === 'POST') {
     requireAdmin($licenseConfig);
 
+    $body = requestBody();
+    $expiryMinutes = isset($body['expiry_minutes']) && $body['expiry_minutes'] !== ''
+        ? (int) $body['expiry_minutes']
+        : (int) $licenseConfig['key_expiry_minutes'];
+    $expiryMinutes = max(1, min($expiryMinutes, 10080));
+
     $code = LicenseCode::generate($pdo);
-    $expiryMinutes = (int) $licenseConfig['key_expiry_minutes'];
     $insert = $pdo->prepare('INSERT INTO license_keys (code, expires_at) VALUES (?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? MINUTE))');
     $insert->execute([$code, $expiryMinutes]);
 

@@ -23,6 +23,17 @@
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   }
   label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+  select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 12px;
+    background: #fff;
+    color: #1a1a1a;
+  }
   input {
     width: 100%;
     box-sizing: border-box;
@@ -76,6 +87,17 @@
     <input id="serverUrl" value="http://localhost/nexapos_license/public/index.php">
     <label for="adminSecret">Admin secret</label>
     <input id="adminSecret" type="password" placeholder="paste your admin_secret here">
+    <label for="expiryPreset">Activation window</label>
+    <select id="expiryPreset" onchange="onExpiryPresetChange()">
+      <option value="30">30 minutes (default)</option>
+      <option value="60">1 hour</option>
+      <option value="360">6 hours</option>
+      <option value="1440">24 hours</option>
+      <option value="4320">3 days</option>
+      <option value="10080">7 days (max)</option>
+      <option value="custom">Custom...</option>
+    </select>
+    <input id="expiryCustom" type="number" min="1" max="10080" placeholder="Minutes (1-10080)" style="display:none">
     <button id="generateBtn" onclick="generateKey()">Generate key</button>
     <div class="result" id="result">
       <div class="code" id="codeText"></div>
@@ -94,11 +116,28 @@
 <script>
 let countdownInterval = null;
 
+// Defaults to wherever this page is actually being served from (local
+// XAMPP or the live Render deployment) rather than a hardcoded
+// localhost URL, so the same file works correctly either way without
+// editing.
+if (location.protocol === 'http:' || location.protocol === 'https:') {
+  document.getElementById('serverUrl').value = location.origin + '/index.php';
+}
+
 function serverUrl() {
   return document.getElementById('serverUrl').value.trim();
 }
 function adminSecret() {
   return document.getElementById('adminSecret').value.trim();
+}
+function expiryMinutes() {
+  const preset = document.getElementById('expiryPreset').value;
+  if (preset !== 'custom') return parseInt(preset, 10);
+  return parseInt(document.getElementById('expiryCustom').value, 10) || 30;
+}
+function onExpiryPresetChange() {
+  const isCustom = document.getElementById('expiryPreset').value === 'custom';
+  document.getElementById('expiryCustom').style.display = isCustom ? 'block' : 'none';
 }
 function showMsg(id, text, ok) {
   const el = document.getElementById(id);
@@ -113,7 +152,8 @@ async function generateKey() {
   try {
     const res = await fetch(serverUrl() + '?action=issue', {
       method: 'POST',
-      headers: { 'X-Admin-Secret': adminSecret() },
+      headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expiry_minutes: expiryMinutes() }),
     });
     const data = await res.json();
     if (!data.success) {
@@ -136,15 +176,21 @@ function startCountdown(expiresAtUtc) {
   const expiry = new Date(expiresAtUtc.replace(' ', 'T') + 'Z').getTime();
   const tick = () => {
     const remaining = Math.max(0, Math.floor((expiry - Date.now()) / 1000));
-    const m = Math.floor(remaining / 60);
-    const s = remaining % 60;
     const timerEl = document.getElementById('timerText');
     if (remaining <= 0) {
       timerEl.textContent = 'Expired - generate a new one if the customer hasn\'t activated yet.';
       clearInterval(countdownInterval);
-    } else {
-      timerEl.textContent = `Expires in ${m}m ${s.toString().padStart(2, '0')}s`;
+      return;
     }
+    const d = Math.floor(remaining / 86400);
+    const h = Math.floor((remaining % 86400) / 3600);
+    const m = Math.floor((remaining % 3600) / 60);
+    const s = remaining % 60;
+    let parts;
+    if (d > 0) parts = `${d}d ${h}h ${m}m`;
+    else if (h > 0) parts = `${h}h ${m}m`;
+    else parts = `${m}m ${s.toString().padStart(2, '0')}s`;
+    timerEl.textContent = `Expires in ${parts}`;
   };
   tick();
   countdownInterval = setInterval(tick, 1000);
