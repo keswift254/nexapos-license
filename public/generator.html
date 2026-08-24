@@ -43,6 +43,10 @@
     font-size: 14px;
     margin-bottom: 12px;
   }
+  input:read-only {
+    background: #f0f0f3;
+    color: #555;
+  }
   button {
     width: 100%;
     padding: 12px;
@@ -127,7 +131,7 @@
 
   <div class="card">
     <label for="publishVersion">Publish app update - run once per real release, after the new NexaPOS.apk/NexaPOS-Windows.zip are already pushed to the download site</label>
-    <input id="publishVersion" placeholder="Version, e.g. 1.0.1">
+    <input id="publishVersion" placeholder="Loading current version..." readonly>
     <label for="publishNotes">Release notes (optional, shown to users)</label>
     <input id="publishNotes" placeholder="What changed">
     <label for="publishWindowsUrl">Windows download URL</label>
@@ -147,6 +151,34 @@ let countdownInterval = null;
 // editing.
 if (location.protocol === 'http:' || location.protocol === 'https:') {
   document.getElementById('serverUrl').value = location.origin + '/index.php';
+}
+loadSuggestedVersion();
+
+// Bumps just the last dotted segment ("1.0.1" -> "1.0.2") - the common
+// case by far (a bug-fix release, which is what this admin tool is
+// mostly used for). A real minor/major bump is rare enough that it's
+// not worth a second control for it here.
+function incrementPatch(version) {
+  const parts = version.split('.');
+  const last = parseInt(parts[parts.length - 1], 10);
+  parts[parts.length - 1] = Number.isNaN(last) ? '1' : String(last + 1);
+  return parts.join('.');
+}
+
+// Locked to auto-computed-from-the-currently-published-version on
+// purpose - a hand-typed version field is exactly what produced a
+// broken publish once already ("Version 1.0.2" typed as literal text,
+// which the app's numeric version comparison silently treated as
+// 0.0.2). Deriving it removes that whole class of mistake.
+async function loadSuggestedVersion() {
+  const field = document.getElementById('publishVersion');
+  try {
+    const res = await fetch(serverUrl() + '?action=latest_version');
+    const data = await res.json();
+    field.value = data.success && data.version ? incrementPatch(data.version) : '1.0.0';
+  } catch (e) {
+    field.placeholder = 'Could not auto-fill - check server address above';
+  }
 }
 
 function serverUrl() {
