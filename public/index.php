@@ -394,4 +394,44 @@ if ($action === 'revoke' && $method === 'POST') {
     jsonResponse(['success' => true, 'revoked' => $revoke->rowCount() === 1]);
 }
 
+/**
+ * Public - the app checks this (piggybacking on its existing periodic
+ * sync timer, see nexapos_mobile's UpdateService) to see if a newer
+ * build exists. No auth: version metadata isn't sensitive, and every
+ * installed copy of the app needs to be able to ask this.
+ */
+if ($action === 'latest_version' && $method === 'GET') {
+    $stmt = $pdo->query('SELECT version, windows_url, android_url, release_notes, updated_at FROM app_version WHERE id = 1');
+    $row = $stmt->fetch();
+    if (!$row) {
+        jsonResponse(['success' => false, 'message' => 'No version has been published yet.'], 404);
+    }
+    jsonResponse(['success' => true] + $row);
+}
+
+/**
+ * Admin action - run once per real release, from generator.html's
+ * "Publish app update" section, right after the new build's
+ * NexaPOS.apk/NexaPOS-Windows.zip are pushed to the download site.
+ */
+if ($action === 'set_latest_version' && $method === 'POST') {
+    requireAdmin($licenseConfig);
+    $body = requestBody();
+    $version = trim((string) ($body['version'] ?? ''));
+    $windowsUrl = trim((string) ($body['windows_url'] ?? ''));
+    $androidUrl = trim((string) ($body['android_url'] ?? ''));
+    $releaseNotes = trim((string) ($body['release_notes'] ?? ''));
+    if ($version === '' || $windowsUrl === '' || $androidUrl === '') {
+        jsonResponse(['success' => false, 'message' => 'version, windows_url, and android_url are required.'], 422);
+    }
+    $upsert = $pdo->prepare('
+        INSERT INTO app_version (id, version, windows_url, android_url, release_notes)
+        VALUES (1, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE version = VALUES(version), windows_url = VALUES(windows_url),
+            android_url = VALUES(android_url), release_notes = VALUES(release_notes)
+    ');
+    $upsert->execute([$version, $windowsUrl, $androidUrl, $releaseNotes !== '' ? $releaseNotes : null]);
+    jsonResponse(['success' => true]);
+}
+
 jsonResponse(['success' => false, 'message' => 'Unknown action.'], 404);

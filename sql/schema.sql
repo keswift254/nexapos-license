@@ -50,3 +50,19 @@ CREATE TABLE IF NOT EXISTS leads (
     phone VARCHAR(40) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Single-row "what's the latest build" record for the app's in-app
+-- update checker - the vendor publishes a new row (via generator.html)
+-- each time a build ships; the app compares its own version against
+-- this and offers to download+install if newer. id is always 1 - an
+-- UPSERT via ON DUPLICATE KEY UPDATE keeps this genuinely a single
+-- current row, not a growing history (nothing needs old versions once
+-- superseded).
+CREATE TABLE IF NOT EXISTS app_version (
+    id TINYINT NOT NULL PRIMARY KEY DEFAULT 1,
+    version VARCHAR(20) NOT NULL,
+    windows_url VARCHAR(500) NOT NULL,
+    android_url VARCHAR(500) NOT NULL,
+    release_notes TEXT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);

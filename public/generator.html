@@ -125,6 +125,19 @@
     <div class="msg" id="revokeMsg"></div>
   </div>
 
+  <div class="card">
+    <label for="publishVersion">Publish app update - run once per real release, after the new NexaPOS.apk/NexaPOS-Windows.zip are already pushed to the download site</label>
+    <input id="publishVersion" placeholder="Version, e.g. 1.0.1">
+    <label for="publishNotes">Release notes (optional, shown to users)</label>
+    <input id="publishNotes" placeholder="What changed">
+    <label for="publishWindowsUrl">Windows download URL</label>
+    <input id="publishWindowsUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Windows.zip">
+    <label for="publishAndroidUrl">Android download URL</label>
+    <input id="publishAndroidUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS.apk">
+    <button onclick="publishVersion()">Publish update</button>
+    <div class="msg" id="publishMsg"></div>
+  </div>
+
 <script>
 let countdownInterval = null;
 
@@ -240,6 +253,33 @@ async function revokeKey() {
     }
   } catch (e) {
     showMsg('revokeMsg', 'Could not reach the license server: ' + e, false);
+  }
+}
+
+async function publishVersion() {
+  const version = document.getElementById('publishVersion').value.trim();
+  const windowsUrl = document.getElementById('publishWindowsUrl').value.trim();
+  const androidUrl = document.getElementById('publishAndroidUrl').value.trim();
+  const releaseNotes = document.getElementById('publishNotes').value.trim();
+  document.getElementById('publishMsg').className = 'msg';
+  if (!version || !windowsUrl || !androidUrl) {
+    showMsg('publishMsg', 'Version, Windows URL, and Android URL are all required.', false);
+    return;
+  }
+  try {
+    const res = await fetch(serverUrl() + '?action=set_latest_version', {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version, windows_url: windowsUrl, android_url: androidUrl, release_notes: releaseNotes }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      showMsg('publishMsg', `Published version ${version} - installed apps will see it on their next update check.`, true);
+    } else {
+      showMsg('publishMsg', data.message || 'Could not publish the update.', false);
+    }
+  } catch (e) {
+    showMsg('publishMsg', 'Could not reach the license server: ' + e, false);
   }
 }
 </script>
