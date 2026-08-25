@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>NexaPOS Key Generator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root { color-scheme: light dark; }
   body {
@@ -235,11 +236,72 @@ async function generateKey() {
       : 'Once activated, never expires';
     document.getElementById('result').className = 'result show';
     startCountdown(data.expires_at);
+    downloadKeyPdf(data, days);
   } catch (e) {
     showMsg('generateMsg', 'Could not reach the license server: ' + e, false);
   } finally {
     btn.disabled = false;
   }
+}
+
+// Receipt-width (80mm) rather than a full page - matches the thermal
+// receipt printers these shops already use for POS receipts, and a
+// single short code doesn't need a full sheet. jsPDF's own save()
+// triggers a normal browser download, which lands wherever downloads
+// normally go on that device (Downloads folder on desktop, the Files/
+// Downloads app on mobile) - no separate device-specific handling
+// needed, the browser already does the right thing per platform.
+// sequence_number is license_keys.id itself (see index.php's issue
+// action) - "Key No." on the PDF always matches that row 1:1.
+function downloadKeyPdf(data, durationDaysValue) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'mm', format: [80, 120] });
+  const centerX = 40;
+  let y = 12;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.text('NexaPOS License Key', centerX, y, { align: 'center' });
+  y += 7;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  const seq = String(data.sequence_number ?? '').padStart(4, '0');
+  doc.text(`Key No. ${seq}`, centerX, y, { align: 'center' });
+  y += 8;
+
+  doc.setDrawColor(200);
+  doc.line(6, y, 74, y);
+  y += 8;
+
+  doc.setFont('courier', 'bold');
+  doc.setFontSize(16);
+  doc.text(data.code, centerX, y, { align: 'center' });
+  y += 10;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  const issuedAt = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+  doc.text(`Issued: ${issuedAt}`, centerX, y, { align: 'center' });
+  y += 5;
+  const expiresAt = (data.expires_at || '').slice(0, 16);
+  doc.text(`Activation window closes: ${expiresAt}`, centerX, y, { align: 'center', maxWidth: 68 });
+  y += 5;
+  doc.text(
+    durationDaysValue
+      ? `Once activated: valid ${durationDaysValue} day${durationDaysValue === 1 ? '' : 's'}`
+      : 'Once activated: never expires',
+    centerX, y, { align: 'center' }
+  );
+  y += 8;
+
+  doc.setDrawColor(200);
+  doc.line(6, y, 74, y);
+  y += 6;
+  doc.setFontSize(7);
+  doc.text('One-time use - locks to the first device that activates it.', centerX, y, { align: 'center', maxWidth: 68 });
+
+  doc.save(`NexaPOS-Key-${seq}-${data.code}.pdf`);
 }
 
 function startCountdown(expiresAtUtc) {

@@ -278,11 +278,22 @@ if ($action === 'issue' && $method === 'POST') {
     $code = LicenseCode::generate($pdo);
     $insert = $pdo->prepare('INSERT INTO license_keys (code, expires_at, valid_days) VALUES (?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL ? MINUTE), ?)');
     $insert->execute([$code, $expiryMinutes, $validDays]);
+    // license_keys.id is already a real auto-increment sequence - reused
+    // directly as the printed/PDF'd key number rather than adding a
+    // second counter, so "key #14" always means the 14th row, no
+    // separate thing to keep in sync.
+    $sequenceNumber = (int) $pdo->lastInsertId();
 
     $issued = $pdo->prepare('SELECT expires_at FROM license_keys WHERE code = ?');
     $issued->execute([$code]);
 
-    jsonResponse(['success' => true, 'code' => $code, 'expires_at' => $issued->fetchColumn(), 'valid_days' => $validDays]);
+    jsonResponse([
+        'success' => true,
+        'code' => $code,
+        'expires_at' => $issued->fetchColumn(),
+        'valid_days' => $validDays,
+        'sequence_number' => $sequenceNumber,
+    ]);
 }
 
 /**
