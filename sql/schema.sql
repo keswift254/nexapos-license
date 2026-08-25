@@ -51,6 +51,20 @@ CREATE TABLE IF NOT EXISTS leads (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Rate limits register_lead, the one unauthenticated cross-origin action
+-- on this server - logs every attempt (success or not) by IP, so the
+-- same submitter can't just cycle through fresh email addresses to
+-- mass-email strangers or flood the vendor's inbox (see register_lead's
+-- own comment). Unbounded growth accepted at this project's real
+-- volume, same tradeoff already made for nexapos_platform's
+-- sync_changes/join_attempts tables.
+CREATE TABLE IF NOT EXISTS lead_attempts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ip_address VARCHAR(45) NOT NULL,
+    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX (ip_address, attempted_at)
+);
+
 -- Single-row "what's the latest build" record for the app's in-app
 -- update checker - the vendor publishes a new row (via generator.html)
 -- each time a build ships; the app compares its own version against

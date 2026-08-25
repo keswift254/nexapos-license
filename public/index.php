@@ -186,6 +186,25 @@ if ($action === 'register_lead' && $method === 'POST') {
         jsonResponse(['success' => false, 'message' => 'A valid name and email are required.'], 422);
     }
 
+    // This is the one action on this server callable cross-origin by
+    // anyone (see the CORS comment above) with no auth of any kind - and
+    // a successful call sends two real emails (vendor notification +
+    // "welcome" to whatever address was typed in). Without a limit,
+    // it's a free way to mass-email arbitrary third parties or flood the
+    // vendor's inbox. leads.email being UNIQUE already stops the same
+    // address being hit twice; this stops the same submitter from just
+    // moving on to a new address each time.
+    $ip = trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+    if ($ip !== '') {
+        $recent = $pdo->prepare('SELECT COUNT(*) FROM lead_attempts WHERE ip_address = ? AND attempted_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)');
+        $recent->execute([$ip]);
+        if ((int) $recent->fetchColumn() >= 5) {
+            jsonResponse(['success' => false, 'message' => 'Too many registrations from this connection. Try again later.'], 429);
+        }
+        $log = $pdo->prepare('INSERT INTO lead_attempts (ip_address) VALUES (?)');
+        $log->execute([$ip]);
+    }
+
     // leads.email is UNIQUE - catching the constraint violation is the
     // atomic version of this check (no separate SELECT-then-INSERT race
     // between two near-simultaneous submissions of the same address).
