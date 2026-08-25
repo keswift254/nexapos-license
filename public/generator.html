@@ -138,14 +138,17 @@
     <label for="publishNotes">Release notes (optional, shown to users)</label>
     <input id="publishNotes" placeholder="What changed">
     <label for="publishWindowsUrl">Windows download URL</label>
-    <input id="publishWindowsUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Windows.zip">
-    <label for="publishWindowsSha256">Windows file SHA-256 (optional, but installs won't be integrity-checked without it)</label>
-    <input id="publishWindowsSha256" placeholder="64-character hex hash of the .zip">
+    <input id="publishWindowsUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Windows.zip" onchange="hashPublishFile('windows')">
+    <label for="publishWindowsSha256">Windows file SHA-256 (computed from the file actually at the URL above)</label>
+    <input id="publishWindowsSha256" placeholder="Click \"Fetch & verify files\" below" readonly>
     <label for="publishAndroidUrl">Android download URL</label>
-    <input id="publishAndroidUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS.apk">
-    <label for="publishAndroidSha256">Android file SHA-256 (optional, but installs won't be integrity-checked without it)</label>
-    <input id="publishAndroidSha256" placeholder="64-character hex hash of the .apk">
-    <button onclick="publishVersion()">Publish update</button>
+    <input id="publishAndroidUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS.apk" onchange="hashPublishFile('android')">
+    <label for="publishAndroidSha256">Android file SHA-256 (computed from the file actually at the URL above)</label>
+    <input id="publishAndroidSha256" placeholder="Click &quot;Fetch &amp; verify files&quot; below" readonly>
+    <button onclick="hashBothPublishFiles()" id="hashFilesBtn">Fetch &amp; verify files</button>
+    <div class="msg" id="hashMsg"></div>
+    <div style="height:10px"></div>
+    <button onclick="publishVersion()" id="publishBtn" disabled>Publish update</button>
     <div class="msg" id="publishMsg"></div>
   </div>
 
@@ -177,14 +180,91 @@ function incrementPatch(version) {
 // broken publish once already ("Version 1.0.2" typed as literal text,
 // which the app's numeric version comparison silently treated as
 // 0.0.2). Deriving it removes that whole class of mistake.
+//
+// Also remembers the currently-published hashes (publishedShas) so
+// hashPublishFile can tell "genuinely new file" apart from "someone
+// published a new version number without actually rebuilding" - which
+// happened twice for real (1.0.2 and again at 1.0.4/1.0.5) before this
+// existed: the URLs never changed, so the "update" silently reinstalled
+// the same bits every time and devices never actually moved version.
+let publishedShas = { windows: null, android: null };
+
 async function loadSuggestedVersion() {
   const field = document.getElementById('publishVersion');
   try {
     const res = await fetch(serverUrl() + '?action=latest_version');
     const data = await res.json();
     field.value = data.success && data.version ? incrementPatch(data.version) : '1.0.0';
+    if (data.success) {
+      publishedShas = { windows: data.windows_sha256 || null, android: data.android_sha256 || null };
+    }
   } catch (e) {
     field.placeholder = 'Could not auto-fill - check server address above';
+  }
+}
+
+async function sha256OfUrl(url) {
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const buffer = await res.arrayBuffer();
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Fetches the real file currently sitting at the Windows/Android URL
+// and hashes it client-side - this is deliberately NOT something the
+// admin types in, so the hash can never drift from what the URL
+// actually serves. If it matches the hash already published for the
+// current live version, the file hasn't changed since last time, which
+// means publishing a new version number now would announce an update
+// with nothing behind it - so this refuses to arm the Publish button
+// until every platform's file has genuinely changed.
+async function hashPublishFile(platform) {
+  const urlField = document.getElementById(platform === 'windows' ? 'publishWindowsUrl' : 'publishAndroidUrl');
+  const shaField = document.getElementById(platform === 'windows' ? 'publishWindowsSha256' : 'publishAndroidSha256');
+  const url = urlField.value.trim();
+  if (!url) return null;
+  shaField.value = '';
+  shaField.placeholder = 'Fetching and hashing...';
+  try {
+    const hash = await sha256OfUrl(url);
+    shaField.value = hash;
+    shaField.placeholder = '';
+    return hash;
+  } catch (e) {
+    shaField.placeholder = 'Could not fetch/hash this file: ' + e;
+    return null;
+  }
+}
+
+async function hashBothPublishFiles() {
+  const btn = document.getElementById('hashFilesBtn');
+  const publishBtn = document.getElementById('publishBtn');
+  btn.disabled = true;
+  publishBtn.disabled = true;
+  document.getElementById('hashMsg').className = 'msg';
+  try {
+    const [windowsSha, androidSha] = await Promise.all([hashPublishFile('windows'), hashPublishFile('android')]);
+    if (!windowsSha || !androidSha) {
+      showMsg('hashMsg', 'Could not fetch/hash one or both files - check the URLs above.', false);
+      return;
+    }
+    const staleWindows = publishedShas.windows && windowsSha === publishedShas.windows;
+    const staleAndroid = publishedShas.android && androidSha === publishedShas.android;
+    if (staleWindows || staleAndroid) {
+      const which = [staleWindows && 'Windows', staleAndroid && 'Android'].filter(Boolean).join(' and ');
+      showMsg(
+        'hashMsg',
+        `${which} file${staleWindows && staleAndroid ? 's are' : ' is'} identical to what's already published - `
+          + `looks like the new build wasn't actually pushed to the download site yet. Rebuild and push first, then try again.`,
+        false,
+      );
+      return;
+    }
+    showMsg('hashMsg', 'Both files verified and are genuinely different from the currently-published version.', true);
+    publishBtn.disabled = false;
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -368,6 +448,15 @@ async function publishVersion() {
     showMsg('publishMsg', 'Version, Windows URL, and Android URL are all required.', false);
     return;
   }
+  if (!windowsSha256 || !androidSha256) {
+    // Shouldn't be reachable - the button is disabled until
+    // hashBothPublishFiles() succeeds - but this is the one action in
+    // the whole page that actually ships an update to every installed
+    // device, so it gets its own belt-and-suspenders check rather than
+    // trusting button-disabled state alone.
+    showMsg('publishMsg', 'Click "Fetch & verify files" first - publishing without a verified checksum is disabled.', false);
+    return;
+  }
   try {
     const res = await fetch(serverUrl() + '?action=set_latest_version', {
       method: 'POST',
@@ -383,10 +472,14 @@ async function publishVersion() {
     });
     const data = await res.json();
     if (data.success) {
-      const warning = (!windowsSha256 || !androidSha256)
-        ? ' (published without a checksum for at least one platform - installs for that platform won\'t be integrity-checked)'
-        : '';
-      showMsg('publishMsg', `Published version ${version}${warning} - installed apps will see it on their next update check.`, true);
+      showMsg('publishMsg', `Published version ${version} - installed apps will see it on their next update check.`, true);
+      // Re-arm: publishedShas now reflects what was just published, and
+      // the button goes back to disabled until the next real release is
+      // verified fresh - prevents an accidental double-click (or a
+      // second "publish" for a version that hasn't actually changed
+      // again) from sailing through on stale button-enabled state.
+      publishedShas = { windows: windowsSha256, android: androidSha256 };
+      document.getElementById('publishBtn').disabled = true;
     } else {
       showMsg('publishMsg', data.message || 'Could not publish the update.', false);
     }
