@@ -58,11 +58,22 @@ CREATE TABLE IF NOT EXISTS leads (
 -- UPSERT via ON DUPLICATE KEY UPDATE keeps this genuinely a single
 -- current row, not a growing history (nothing needs old versions once
 -- superseded).
+-- windows_sha256/android_sha256: hex SHA-256 of the exact file at
+-- windows_url/android_url, computed by whoever cuts the release (see
+-- generator.html's publish card) - the app verifies the downloaded
+-- bytes against this before extracting/installing anything, since
+-- HTTPS transport alone only protects against tampering in transit,
+-- not the integrity of the file at the URL itself. Nullable so a
+-- version published before this column existed doesn't need backfill
+-- to remain valid - the app treats an absent hash as "skip
+-- verification for this build" rather than a hard failure.
 CREATE TABLE IF NOT EXISTS app_version (
     id TINYINT NOT NULL PRIMARY KEY DEFAULT 1,
     version VARCHAR(20) NOT NULL,
     windows_url VARCHAR(500) NOT NULL,
     android_url VARCHAR(500) NOT NULL,
+    windows_sha256 CHAR(64) NULL,
+    android_sha256 CHAR(64) NULL,
     release_notes TEXT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

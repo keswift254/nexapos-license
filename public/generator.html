@@ -3,7 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <title>NexaPOS Key Generator</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+  integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk"
+  crossorigin="anonymous"></script>
 <style>
   :root { color-scheme: light dark; }
   body {
@@ -137,8 +139,12 @@
     <input id="publishNotes" placeholder="What changed">
     <label for="publishWindowsUrl">Windows download URL</label>
     <input id="publishWindowsUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Windows.zip">
+    <label for="publishWindowsSha256">Windows file SHA-256 (optional, but installs won't be integrity-checked without it)</label>
+    <input id="publishWindowsSha256" placeholder="64-character hex hash of the .zip">
     <label for="publishAndroidUrl">Android download URL</label>
     <input id="publishAndroidUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS.apk">
+    <label for="publishAndroidSha256">Android file SHA-256 (optional, but installs won't be integrity-checked without it)</label>
+    <input id="publishAndroidSha256" placeholder="64-character hex hash of the .apk">
     <button onclick="publishVersion()">Publish update</button>
     <div class="msg" id="publishMsg"></div>
   </div>
@@ -354,6 +360,8 @@ async function publishVersion() {
   const version = document.getElementById('publishVersion').value.trim();
   const windowsUrl = document.getElementById('publishWindowsUrl').value.trim();
   const androidUrl = document.getElementById('publishAndroidUrl').value.trim();
+  const windowsSha256 = document.getElementById('publishWindowsSha256').value.trim();
+  const androidSha256 = document.getElementById('publishAndroidSha256').value.trim();
   const releaseNotes = document.getElementById('publishNotes').value.trim();
   document.getElementById('publishMsg').className = 'msg';
   if (!version || !windowsUrl || !androidUrl) {
@@ -364,11 +372,21 @@ async function publishVersion() {
     const res = await fetch(serverUrl() + '?action=set_latest_version', {
       method: 'POST',
       headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ version, windows_url: windowsUrl, android_url: androidUrl, release_notes: releaseNotes }),
+      body: JSON.stringify({
+        version,
+        windows_url: windowsUrl,
+        android_url: androidUrl,
+        windows_sha256: windowsSha256,
+        android_sha256: androidSha256,
+        release_notes: releaseNotes,
+      }),
     });
     const data = await res.json();
     if (data.success) {
-      showMsg('publishMsg', `Published version ${version} - installed apps will see it on their next update check.`, true);
+      const warning = (!windowsSha256 || !androidSha256)
+        ? ' (published without a checksum for at least one platform - installs for that platform won\'t be integrity-checked)'
+        : '';
+      showMsg('publishMsg', `Published version ${version}${warning} - installed apps will see it on their next update check.`, true);
     } else {
       showMsg('publishMsg', data.message || 'Could not publish the update.', false);
     }

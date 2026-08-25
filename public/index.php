@@ -418,7 +418,7 @@ if ($action === 'revoke' && $method === 'POST') {
  * installed copy of the app needs to be able to ask this.
  */
 if ($action === 'latest_version' && $method === 'GET') {
-    $stmt = $pdo->query('SELECT version, windows_url, android_url, release_notes, updated_at FROM app_version WHERE id = 1');
+    $stmt = $pdo->query('SELECT version, windows_url, android_url, windows_sha256, android_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
     $row = $stmt->fetch();
     if (!$row) {
         jsonResponse(['success' => false, 'message' => 'No version has been published yet.'], 404);
@@ -438,16 +438,36 @@ if ($action === 'set_latest_version' && $method === 'POST') {
     $windowsUrl = trim((string) ($body['windows_url'] ?? ''));
     $androidUrl = trim((string) ($body['android_url'] ?? ''));
     $releaseNotes = trim((string) ($body['release_notes'] ?? ''));
+    $windowsSha256 = strtolower(trim((string) ($body['windows_sha256'] ?? '')));
+    $androidSha256 = strtolower(trim((string) ($body['android_sha256'] ?? '')));
     if ($version === '' || $windowsUrl === '' || $androidUrl === '') {
         jsonResponse(['success' => false, 'message' => 'version, windows_url, and android_url are required.'], 422);
     }
+    // Optional, but if given must actually be a SHA-256 (64 hex chars) -
+    // catches a truncated paste or the wrong value pasted in, rather
+    // than silently storing something that could never match a real
+    // file's hash and would brick every install for this version.
+    if ($windowsSha256 !== '' && !preg_match('/^[0-9a-f]{64}$/', $windowsSha256)) {
+        jsonResponse(['success' => false, 'message' => 'windows_sha256 must be a 64-character hex SHA-256, or left blank.'], 422);
+    }
+    if ($androidSha256 !== '' && !preg_match('/^[0-9a-f]{64}$/', $androidSha256)) {
+        jsonResponse(['success' => false, 'message' => 'android_sha256 must be a 64-character hex SHA-256, or left blank.'], 422);
+    }
     $upsert = $pdo->prepare('
-        INSERT INTO app_version (id, version, windows_url, android_url, release_notes)
-        VALUES (1, ?, ?, ?, ?)
+        INSERT INTO app_version (id, version, windows_url, android_url, windows_sha256, android_sha256, release_notes)
+        VALUES (1, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE version = VALUES(version), windows_url = VALUES(windows_url),
-            android_url = VALUES(android_url), release_notes = VALUES(release_notes)
+            android_url = VALUES(android_url), windows_sha256 = VALUES(windows_sha256),
+            android_sha256 = VALUES(android_sha256), release_notes = VALUES(release_notes)
     ');
-    $upsert->execute([$version, $windowsUrl, $androidUrl, $releaseNotes !== '' ? $releaseNotes : null]);
+    $upsert->execute([
+        $version,
+        $windowsUrl,
+        $androidUrl,
+        $windowsSha256 !== '' ? $windowsSha256 : null,
+        $androidSha256 !== '' ? $androidSha256 : null,
+        $releaseNotes !== '' ? $releaseNotes : null,
+    ]);
     jsonResponse(['success' => true]);
 }
 
