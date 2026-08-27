@@ -64,6 +64,17 @@
   .pill.unused { background: #fef9c3; color: #854d0e; }
   .pill.nocode { background: #f3f4f6; color: #888; }
   .owner-tag { font-size: 11px; color: #4f46e5; font-weight: 600; }
+  .delete-btn {
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    background: #dc2626;
+    border-radius: 6px;
+  }
+  .delete-btn:disabled { opacity: 0.4; cursor: default; }
+  .search-row { margin-bottom: 14px; }
+  .search-row input { margin-bottom: 0; }
+  .count { font-size: 12px; color: #666; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -89,6 +100,10 @@
   </div>
 
   <div class="card">
+    <div class="search-row">
+      <label for="search">Search (device label, device ID, shop, or activation code)</label>
+      <input id="search" placeholder="Start typing to filter..." oninput="renderRows()">
+    </div>
     <div class="table-wrap">
       <table>
         <thead>
@@ -100,13 +115,15 @@
             <th>Activation code</th>
             <th>Code status</th>
             <th>Expires in</th>
+            <th></th>
           </tr>
         </thead>
         <tbody id="rows">
-          <tr><td colspan="7" style="color:#888">Enter your admin secret above and click "Load devices".</td></tr>
+          <tr><td colspan="8" style="color:#888">Enter your admin secret above and click "Load devices".</td></tr>
         </tbody>
       </table>
     </div>
+    <div class="count" id="rowCount"></div>
   </div>
 
 <script>
@@ -195,18 +212,39 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+function matchesSearch(device, license, query) {
+  if (!query) return true;
+  const haystack = [
+    device.device_label, device.device_id, device.business_name, license?.code,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return haystack.includes(query);
+}
+
 function renderRows() {
   const tbody = document.getElementById('rows');
+  const countEl = document.getElementById('rowCount');
+  const query = document.getElementById('search').value.trim().toLowerCase();
+  const visible = deviceRows.filter(({ device, license }) => matchesSearch(device, license, query));
+
+  countEl.textContent = deviceRows.length
+    ? `Showing ${visible.length} of ${deviceRows.length} device(s)`
+    : '';
+
   if (deviceRows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="color:#888">No devices found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="color:#888">No devices found.</td></tr>';
+    return;
+  }
+  if (visible.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="color:#888">No devices match your search.</td></tr>';
     return;
   }
 
-  tbody.innerHTML = deviceRows.map(({ device, license }) => {
+  tbody.innerHTML = visible.map(({ device, license }) => {
     const lastSeen = device.last_seen_at ? new Date(device.last_seen_at.replace(' ', 'T') + 'Z').getTime() : null;
     const online = lastSeen !== null && (Date.now() - lastSeen) < ONLINE_WINDOW_MS;
-    const statusPill = device.status === 'disabled'
-      ? '<span class="pill offline">Revoked device</span>'
+    const isDisabled = device.status === 'disabled';
+    const statusPill = isDisabled
+      ? '<span class="pill offline">Deleted device</span>'
       : `<span class="pill ${online ? 'online' : 'offline'}">${online ? 'Online' : 'Offline'}</span>`;
 
     const codeStatusMap = { used: 'Used', extended: 'Extended', revoked: 'Revoked', unused: 'Unused' };
@@ -216,6 +254,10 @@ function renderRows() {
 
     const expiresIn = license && license.status !== 'revoked' ? formatCountdown(license.valid_until) : '-';
 
+    const deleteCell = isDisabled
+      ? ''
+      : `<button class="delete-btn" onclick="deleteDevice(${device.id}, '${escapeHtml(device.device_label || 'this device').replace(/'/g, "\\'")}')">Delete</button>`;
+
     return `<tr>
       <td>${escapeHtml(device.device_label || 'Unnamed device')}${device.is_owner ? ' <span class="owner-tag">OWNER</span>' : ''}</td>
       <td class="mono">${escapeHtml(device.device_id)}</td>
@@ -224,8 +266,41 @@ function renderRows() {
       <td class="mono">${license ? escapeHtml(license.code) : '-'}</td>
       <td>${codeStatusPill}</td>
       <td>${expiresIn}</td>
+      <td>${deleteCell}</td>
     </tr>`;
   }).join('');
+}
+
+// "Delete" here means the same thing revoke_device already means
+// elsewhere in this app: status -> 'disabled', not a real SQL DELETE
+// (see admin_revoke_device's own comment in nexapos_platform for why -
+// clients.id is FK'd from transactions, and a hard delete would strand
+// a shop with no owner if it happened to be the founding device). The
+// device stops being able to authenticate at all from this point on -
+// Auth::requireClient already enforces 'disabled' everywhere.
+async function deleteDevice(clientId, label) {
+  if (!confirm(`Delete "${label}"? This device will immediately lose all access and cannot authenticate again. This cannot be undone from here.`)) {
+    return;
+  }
+  const secret = adminSecret();
+  const platformUrl = document.getElementById('platformUrl').value.trim();
+  try {
+    const res = await fetch(platformUrl + '?action=admin_revoke_device', {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': secret, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: clientId }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      alert(data.message || 'Could not delete that device.');
+      return;
+    }
+    const row = deviceRows.find(({ device }) => device.id === clientId);
+    if (row) row.device.status = 'disabled';
+    renderRows();
+  } catch (e) {
+    alert('Could not reach the server: ' + e);
+  }
 }
 </script>
 </body>
