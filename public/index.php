@@ -274,6 +274,48 @@ if ($action === 'list_leads' && $method === 'GET') {
 }
 
 /**
+ * Admin action - every license key, for the vendor-wide device
+ * dashboard (matched to a device there by device_id, which this table
+ * and nexapos_platform's clients table both populate from the same
+ * client-generated UUID).
+ *
+ * status isn't a stored column - there's no schema flag for "was this
+ * key ever extended", so it's derived here from what's already there:
+ * a key's valid_until only ever drifts away from
+ * activated_at + valid_days (the value it would still have if never
+ * touched again after activation) via the extend action, so any
+ * mismatch between the two really did come from a real extension.
+ * Never expiring (valid_days/valid_until both NULL) can't be extended
+ * at all (see the extend action's own check), so it can never produce
+ * a false "extended" this way either.
+ */
+if ($action === 'list_licenses' && $method === 'GET') {
+    requireAdmin($licenseConfig);
+    $rows = $pdo->query('
+        SELECT code, device_id, issued_at, activated_at, valid_days, valid_until, revoked, revoked_at
+        FROM license_keys
+        ORDER BY id DESC
+    ')->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($rows as &$row) {
+        if ((int) $row['revoked'] === 1) {
+            $row['status'] = 'revoked';
+        } elseif ($row['activated_at'] === null) {
+            $row['status'] = 'unused';
+        } elseif ($row['valid_days'] === null) {
+            $row['status'] = 'used';
+        } else {
+            $baseline = strtotime((string) $row['activated_at'] . ' UTC') + ((int) $row['valid_days'] * 86400);
+            $actual = $row['valid_until'] !== null ? strtotime((string) $row['valid_until'] . ' UTC') : null;
+            $row['status'] = ($actual !== null && $actual !== $baseline) ? 'extended' : 'used';
+        }
+    }
+    unset($row);
+
+    jsonResponse(['success' => true, 'licenses' => $rows]);
+}
+
+/**
  * Only the key generator tool (run by whoever holds admin_secret) calls
  * this - once per sale, right after payment clears. Deliberately no
  * customer-identifying info accepted or stored here (see schema.sql's

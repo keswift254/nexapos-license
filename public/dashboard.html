@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NexaPOS Device Dashboard</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    max-width: 1100px;
+    margin: 40px auto;
+    padding: 0 20px;
+    background: #f5f5f7;
+    color: #1a1a1a;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  p.sub { color: #666; font-size: 13px; margin-top: 0; }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 12px;
+  }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  button {
+    padding: 10px 18px;
+    border: none;
+    border-radius: 8px;
+    background: #4f46e5;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .msg { font-size: 13px; margin-top: 10px; padding: 10px; border-radius: 8px; display: none; }
+  .msg.show { display: block; }
+  .msg.err { background: #fee2e2; color: #991b1b; }
+  .meta { font-size: 12px; color: #666; margin-bottom: 10px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #eee; white-space: nowrap; }
+  th { color: #666; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.02em; }
+  td.mono { font-family: monospace; font-size: 12px; }
+  .table-wrap { overflow-x: auto; }
+
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill.online { background: #dcfce7; color: #166534; }
+  .pill.offline { background: #f3f4f6; color: #555; }
+  .pill.used { background: #eef2ff; color: #3730a3; }
+  .pill.extended { background: #dbeafe; color: #1e40af; }
+  .pill.revoked { background: #fee2e2; color: #991b1b; }
+  .pill.unused { background: #fef9c3; color: #854d0e; }
+  .pill.nocode { background: #f3f4f6; color: #888; }
+  .owner-tag { font-size: 11px; color: #4f46e5; font-weight: 600; }
+</style>
+</head>
+<body>
+  <h1>NexaPOS Device Dashboard</h1>
+  <p class="sub">Every registered device across every shop, joined with its license status. A device appears here the moment it registers - it does not need a license activated yet.</p>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="platformUrl">nexapos_platform address</label>
+        <input id="platformUrl" value="https://nexapos-platform.onrender.com/index.php">
+      </div>
+      <div>
+        <label for="licenseUrl">nexapos_license address</label>
+        <input id="licenseUrl" value="https://nexapos-license-1.onrender.com/index.php">
+      </div>
+    </div>
+    <label for="adminSecret">Admin secret</label>
+    <input id="adminSecret" type="password" placeholder="paste your admin_secret here">
+    <button id="loadBtn" onclick="loadDashboard()">Load devices</button>
+    <span class="meta" id="lastLoaded" style="margin-left:12px"></span>
+    <div class="msg err" id="loadMsg"></div>
+  </div>
+
+  <div class="card">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Device label</th>
+            <th>Device ID</th>
+            <th>Shop</th>
+            <th>Status</th>
+            <th>Activation code</th>
+            <th>Code status</th>
+            <th>Expires in</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td colspan="7" style="color:#888">Enter your admin secret above and click "Load devices".</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+// A device counts as online if it's authenticated within this window -
+// every authenticated call (sync included, which the app runs every 2
+// minutes while open) stamps last_seen_at server-side, so this is a
+// real recency signal, not a stored guess. Purely a client-side
+// threshold, not persisted anywhere, so it can be tuned without a
+// migration.
+const ONLINE_WINDOW_MS = 5 * 60 * 1000;
+
+let deviceRows = [];
+let tickInterval = null;
+
+function adminSecret() {
+  return document.getElementById('adminSecret').value.trim();
+}
+function showMsg(id, text) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = text ? 'msg show err' : 'msg';
+}
+
+async function loadDashboard() {
+  const btn = document.getElementById('loadBtn');
+  const secret = adminSecret();
+  if (!secret) {
+    showMsg('loadMsg', 'Enter the admin secret first.');
+    return;
+  }
+  btn.disabled = true;
+  showMsg('loadMsg', '');
+  try {
+    const platformUrl = document.getElementById('platformUrl').value.trim();
+    const licenseUrl = document.getElementById('licenseUrl').value.trim();
+
+    const [devicesRes, licensesRes] = await Promise.all([
+      fetch(platformUrl + '?action=list_all_devices', { headers: { 'X-Admin-Secret': secret } }),
+      fetch(licenseUrl + '?action=list_licenses', { headers: { 'X-Admin-Secret': secret } }),
+    ]);
+    const devicesData = await devicesRes.json();
+    const licensesData = await licensesRes.json();
+
+    if (!devicesData.success) throw new Error(devicesData.message || 'Could not load devices from nexapos_platform.');
+    if (!licensesData.success) throw new Error(licensesData.message || 'Could not load licenses from nexapos_license.');
+
+    // Devices drive the table (a device exists here the instant it
+    // registers, license or not) - license info is looked up per
+    // device_id and just left blank when there's no match yet.
+    const licenseByDevice = new Map();
+    for (const lic of licensesData.licenses) {
+      if (lic.device_id) licenseByDevice.set(lic.device_id, lic);
+    }
+
+    deviceRows = devicesData.devices.map((d) => ({
+      device: d,
+      license: licenseByDevice.get(d.device_id) || null,
+    }));
+
+    document.getElementById('lastLoaded').textContent = 'Loaded ' + deviceRows.length + ' device(s) at ' + new Date().toLocaleTimeString();
+    renderRows();
+    if (tickInterval) clearInterval(tickInterval);
+    tickInterval = setInterval(renderRows, 1000);
+  } catch (e) {
+    showMsg('loadMsg', String(e.message || e));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function formatCountdown(validUntilRaw) {
+  if (!validUntilRaw) return 'Never expires';
+  const target = new Date(validUntilRaw.replace(' ', 'T') + 'Z').getTime();
+  const remaining = target - Date.now();
+  if (remaining <= 0) return 'Expired';
+  const d = Math.floor(remaining / 86400000);
+  const h = Math.floor((remaining % 86400000) / 3600000);
+  const m = Math.floor((remaining % 3600000) / 60000);
+  const s = Math.floor((remaining % 60000) / 1000);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  return `${m}m ${s}s`;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function renderRows() {
+  const tbody = document.getElementById('rows');
+  if (deviceRows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="color:#888">No devices found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = deviceRows.map(({ device, license }) => {
+    const lastSeen = device.last_seen_at ? new Date(device.last_seen_at.replace(' ', 'T') + 'Z').getTime() : null;
+    const online = lastSeen !== null && (Date.now() - lastSeen) < ONLINE_WINDOW_MS;
+    const statusPill = device.status === 'disabled'
+      ? '<span class="pill offline">Revoked device</span>'
+      : `<span class="pill ${online ? 'online' : 'offline'}">${online ? 'Online' : 'Offline'}</span>`;
+
+    const codeStatusMap = { used: 'Used', extended: 'Extended', revoked: 'Revoked', unused: 'Unused' };
+    const codeStatusPill = license
+      ? `<span class="pill ${license.status}">${codeStatusMap[license.status] || license.status}</span>`
+      : '<span class="pill nocode">No code yet</span>';
+
+    const expiresIn = license && license.status !== 'revoked' ? formatCountdown(license.valid_until) : '-';
+
+    return `<tr>
+      <td>${escapeHtml(device.device_label || 'Unnamed device')}${device.is_owner ? ' <span class="owner-tag">OWNER</span>' : ''}</td>
+      <td class="mono">${escapeHtml(device.device_id)}</td>
+      <td>${escapeHtml(device.business_name || ('Shop #' + device.shop_id))}</td>
+      <td>${statusPill}</td>
+      <td class="mono">${license ? escapeHtml(license.code) : '-'}</td>
+      <td>${codeStatusPill}</td>
+      <td>${expiresIn}</td>
+    </tr>`;
+  }).join('');
+}
+</script>
+</body>
+</html>
