@@ -79,7 +79,7 @@
 </head>
 <body>
   <h1>NexaPOS Device Dashboard</h1>
-  <p class="sub">Every registered device across every shop, joined with its license status. A device appears here the moment it registers - it does not need a license activated yet.</p>
+  <p class="sub">Every registered device across every shop, joined with its license status - plus any generated codes that haven't been activated on a device yet. A device appears the instant it registers; a code appears the instant it's generated.</p>
 
   <div class="card">
     <div class="row">
@@ -170,18 +170,28 @@ async function loadDashboard() {
     if (!devicesData.success) throw new Error(devicesData.message || 'Could not load devices from nexapos_platform.');
     if (!licensesData.success) throw new Error(licensesData.message || 'Could not load licenses from nexapos_license.');
 
-    // Devices drive the table (a device exists here the instant it
-    // registers, license or not) - license info is looked up per
-    // device_id and just left blank when there's no match yet.
+    // Devices drive most of the table (a device exists here the instant
+    // it registers, license or not) - license info is looked up per
+    // device_id and just left blank when there's no match yet. Codes
+    // that were issued but never activated on any device have no
+    // device_id to join on at all, so they'd otherwise vanish entirely -
+    // shown as their own rows instead, newest-first (list_licenses is
+    // already ordered that way), so a freshly generated code is visible
+    // immediately rather than only appearing once someone activates it.
     const licenseByDevice = new Map();
+    const unassignedLicenses = [];
     for (const lic of licensesData.licenses) {
       if (lic.device_id) licenseByDevice.set(lic.device_id, lic);
+      else unassignedLicenses.push(lic);
     }
 
-    deviceRows = devicesData.devices.map((d) => ({
+    const deviceEntries = devicesData.devices.map((d) => ({
       device: d,
       license: licenseByDevice.get(d.device_id) || null,
     }));
+    const unassignedEntries = unassignedLicenses.map((lic) => ({ device: null, license: lic }));
+
+    deviceRows = [...unassignedEntries, ...deviceEntries];
 
     document.getElementById('lastLoaded').textContent = 'Loaded ' + deviceRows.length + ' device(s) at ' + new Date().toLocaleTimeString();
     renderRows();
@@ -215,7 +225,7 @@ function escapeHtml(s) {
 function matchesSearch(device, license, query) {
   if (!query) return true;
   const haystack = [
-    device.device_label, device.device_id, device.business_name, license?.code,
+    device?.device_label, device?.device_id, device?.business_name, license?.code,
   ].filter(Boolean).join(' ').toLowerCase();
   return haystack.includes(query);
 }
@@ -240,10 +250,12 @@ function renderRows() {
   }
 
   tbody.innerHTML = visible.map(({ device, license }) => {
-    const lastSeen = device.last_seen_at ? new Date(device.last_seen_at.replace(' ', 'T') + 'Z').getTime() : null;
+    const lastSeen = device?.last_seen_at ? new Date(device.last_seen_at.replace(' ', 'T') + 'Z').getTime() : null;
     const online = lastSeen !== null && (Date.now() - lastSeen) < ONLINE_WINDOW_MS;
-    const isDisabled = device.status === 'disabled';
-    const statusPill = isDisabled
+    const isDisabled = device?.status === 'disabled';
+    const statusPill = !device
+      ? '<span class="pill nocode">Not yet activated</span>'
+      : isDisabled
       ? '<span class="pill offline">Deleted device</span>'
       : `<span class="pill ${online ? 'online' : 'offline'}">${online ? 'Online' : 'Offline'}</span>`;
 
@@ -252,16 +264,21 @@ function renderRows() {
       ? `<span class="pill ${license.status}">${codeStatusMap[license.status] || license.status}</span>`
       : '<span class="pill nocode">No code yet</span>';
 
-    const expiresIn = license && license.status !== 'revoked' ? formatCountdown(license.valid_until) : '-';
+    // Unused codes haven't been activated yet, so valid_until (only set
+    // at activation) is still null - expires_at (the issue-time
+    // redemption window from the issue action) is the real countdown
+    // for those. Every other status already has a meaningful valid_until.
+    const countdownSource = license && license.status === 'unused' ? license.expires_at : license?.valid_until;
+    const expiresIn = license && license.status !== 'revoked' ? formatCountdown(countdownSource) : '-';
 
-    const deleteCell = isDisabled
+    const deleteCell = (!device || isDisabled)
       ? ''
       : `<button class="delete-btn" onclick="deleteDevice(${device.id}, '${escapeHtml(device.device_label || 'this device').replace(/'/g, "\\'")}')">Delete</button>`;
 
     return `<tr>
-      <td>${escapeHtml(device.device_label || 'Unnamed device')}${device.is_owner ? ' <span class="owner-tag">OWNER</span>' : ''}</td>
-      <td class="mono">${escapeHtml(device.device_id)}</td>
-      <td>${escapeHtml(device.business_name || ('Shop #' + device.shop_id))}</td>
+      <td>${device ? escapeHtml(device.device_label || 'Unnamed device') + (device.is_owner ? ' <span class="owner-tag">OWNER</span>' : '') : '<span style="color:#aaa">Not yet activated</span>'}</td>
+      <td class="mono">${device ? escapeHtml(device.device_id) : '-'}</td>
+      <td>${device ? escapeHtml(device.business_name || ('Shop #' + device.shop_id)) : '-'}</td>
       <td>${statusPill}</td>
       <td class="mono">${license ? escapeHtml(license.code) : '-'}</td>
       <td>${codeStatusPill}</td>

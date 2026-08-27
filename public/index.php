@@ -292,7 +292,7 @@ if ($action === 'list_leads' && $method === 'GET') {
 if ($action === 'list_licenses' && $method === 'GET') {
     requireAdmin($licenseConfig);
     $rows = $pdo->query('
-        SELECT code, device_id, issued_at, activated_at, valid_days, valid_until, revoked, revoked_at
+        SELECT code, device_id, issued_at, expires_at, activated_at, valid_days, valid_until, revoked, revoked_at
         FROM license_keys
         ORDER BY id DESC
     ')->fetchAll(PDO::FETCH_ASSOC);
