@@ -133,6 +133,15 @@
   </div>
 
   <div class="card">
+    <label for="extendCode">Extend a license (renewal payment on an already-activated key)</label>
+    <input id="extendCode" placeholder="the activated code to extend">
+    <label for="extendDays">Days to add</label>
+    <input id="extendDays" type="number" min="1" placeholder="e.g. 30">
+    <button onclick="extendLicense()">Extend</button>
+    <div class="msg" id="extendMsg"></div>
+  </div>
+
+  <div class="card">
     <label for="publishVersion">Publish app update - run once per real release, after the new NexaPOS.apk/NexaPOS-Windows.zip are already pushed to the download site</label>
     <input id="publishVersion" placeholder="Loading current version..." readonly>
     <label for="publishNotes">Release notes (optional, shown to users)</label>
@@ -433,6 +442,31 @@ async function revokeKey() {
     }
   } catch (e) {
     showMsg('revokeMsg', 'Could not reach the license server: ' + e, false);
+  }
+}
+
+async function extendLicense() {
+  const code = document.getElementById('extendCode').value.trim();
+  const extraDays = parseInt(document.getElementById('extendDays').value, 10);
+  document.getElementById('extendMsg').className = 'msg';
+  if (!code || !extraDays || extraDays < 1) {
+    showMsg('extendMsg', 'Enter the code and a positive number of days.', false);
+    return;
+  }
+  try {
+    const res = await fetch(serverUrl() + '?action=extend', {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, extra_days: extraDays }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      showMsg('extendMsg', `Extended - now valid until ${data.valid_until} UTC.`, true);
+    } else {
+      showMsg('extendMsg', data.message || 'Could not extend that key.', false);
+    }
+  } catch (e) {
+    showMsg('extendMsg', 'Could not reach the license server: ' + e, false);
   }
 }
 

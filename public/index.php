@@ -440,6 +440,50 @@ if ($action === 'revoke' && $method === 'POST') {
 }
 
 /**
+ * Admin action - a renewal payment on an already-activated key. Extends
+ * from whichever is later, the key's current valid_until or right now
+ * (GREATEST in the UPDATE below) - stacks cleanly onto remaining time
+ * if renewed early, but doesn't backdate onto a stale expiry if the
+ * customer let it lapse first (they're paying for N more days of use
+ * starting now, not N days tacked onto a date that's already passed).
+ * The device picks this up on its own - LicenseService.backgroundVerify
+ * already re-syncs valid_until from verify()'s response on its normal
+ * periodic cycle, no reactivation needed on that end.
+ */
+if ($action === 'extend' && $method === 'POST') {
+    requireAdmin($licenseConfig);
+    $body = requestBody();
+    $code = strtoupper(trim((string) ($body['code'] ?? '')));
+    $extraDays = (int) ($body['extra_days'] ?? 0);
+    if ($code === '' || $extraDays < 1) {
+        jsonResponse(['success' => false, 'message' => 'code and a positive extra_days are required.'], 422);
+    }
+
+    $stmt = $pdo->prepare('SELECT activated_at, valid_until, revoked FROM license_keys WHERE code = ?');
+    $stmt->execute([$code]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        jsonResponse(['success' => false, 'message' => 'No license key with that code.'], 404);
+    }
+    if ($row['activated_at'] === null) {
+        jsonResponse(['success' => false, 'message' => 'This key has not been activated yet - nothing to extend.'], 422);
+    }
+    if ((int) $row['revoked'] === 1) {
+        jsonResponse(['success' => false, 'message' => 'This key has been revoked.'], 422);
+    }
+    if ($row['valid_until'] === null) {
+        jsonResponse(['success' => false, 'message' => 'This license never expires - nothing to extend.'], 422);
+    }
+
+    $update = $pdo->prepare('UPDATE license_keys SET valid_until = DATE_ADD(GREATEST(valid_until, UTC_TIMESTAMP()), INTERVAL ? DAY) WHERE code = ?');
+    $update->execute([$extraDays, $code]);
+
+    $result = $pdo->prepare('SELECT valid_until FROM license_keys WHERE code = ?');
+    $result->execute([$code]);
+    jsonResponse(['success' => true, 'valid_until' => $result->fetchColumn()]);
+}
+
+/**
  * Public - the app checks this (piggybacking on its existing periodic
  * sync timer, see nexapos_mobile's UpdateService) to see if a newer
  * build exists. No auth: version metadata isn't sensitive, and every
