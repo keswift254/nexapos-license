@@ -185,6 +185,15 @@ if ($action === 'register_lead' && $method === 'POST') {
     if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         jsonResponse(['success' => false, 'message' => 'A valid name and email are required.'], 422);
     }
+    // Required, not just validated-if-present: the vendor follows up
+    // with leads by phone (see the WhatsApp CTA on the site), so a
+    // registration with no reachable number isn't useful to them.
+    // Mirrors the site form's own pattern - re-checked here since the
+    // form's HTML5 validation is trivially bypassed by calling this
+    // endpoint directly.
+    if (!preg_match('/^0[17][0-9]{8}$/', $phone)) {
+        jsonResponse(['success' => false, 'message' => 'Enter a valid phone number starting with 07 or 01 (10 digits).'], 422);
+    }
 
     // This is the one action on this server callable cross-origin by
     // anyone (see the CORS comment above) with no auth of any kind - and
@@ -210,7 +219,7 @@ if ($action === 'register_lead' && $method === 'POST') {
     // between two near-simultaneous submissions of the same address).
     try {
         $insert = $pdo->prepare('INSERT INTO leads (name, email, business_name, phone) VALUES (?, ?, ?, ?)');
-        $insert->execute([$name, $email, $businessName !== '' ? $businessName : null, $phone !== '' ? $phone : null]);
+        $insert->execute([$name, $email, $businessName !== '' ? $businessName : null, $phone]);
     } catch (\PDOException $e) {
         if ((int) $e->getCode() === 23000) {
             jsonResponse(['success' => false, 'message' => 'This email is already registered. Check your inbox, or contact us on WhatsApp if you need help.'], 409);
