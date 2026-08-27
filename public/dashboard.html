@@ -82,8 +82,11 @@
     margin-left: 6px;
   }
   .copy-btn:disabled { opacity: 0.7; cursor: default; }
-  .search-row { margin-bottom: 14px; }
+  .search-row { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 6px; }
+  .search-row > div { flex: 1; }
   .search-row input { margin-bottom: 0; }
+  #refreshBtn { background: #eef2ff; color: #3730a3; white-space: nowrap; }
+  .refresh-status { font-size: 12px; color: #666; margin-bottom: 14px; }
   .count { font-size: 12px; color: #666; margin-top: 8px; }
 </style>
 </head>
@@ -111,9 +114,13 @@
 
   <div class="card">
     <div class="search-row">
-      <label for="search">Search (device label, device ID, shop, or activation code)</label>
-      <input id="search" placeholder="Start typing to filter..." oninput="renderRows()">
+      <div>
+        <label for="search">Search (device label, device ID, shop, or activation code)</label>
+        <input id="search" placeholder="Start typing to filter..." oninput="renderRows()">
+      </div>
+      <button id="refreshBtn" onclick="loadDashboard()">Refresh</button>
     </div>
+    <div class="refresh-status" id="refreshStatus"></div>
     <div class="table-wrap">
       <table>
         <thead>
@@ -144,9 +151,22 @@
 // threshold, not persisted anywhere, so it can be tuned without a
 // migration.
 const ONLINE_WINDOW_MS = 5 * 60 * 1000;
+// How often the table re-fetches from the server, separate from
+// tickInterval below (which only re-renders the already-fetched data
+// once a second for a live countdown - no network call of its own).
+const AUTO_REFRESH_MS = 5000;
+
+// Remembered so a page refresh doesn't force retyping the secret, but
+// not kept forever - cleared and re-prompted after ADMIN_SECRET_TTL_MS
+// of inactivity. The window slides forward on every successful load
+// (manual or auto), so it only actually expires once the page has sat
+// idle/closed for a full 20 minutes, not 20 minutes after first entry.
+const ADMIN_SECRET_KEY = 'nexapos.dashboard.adminSecret';
+const ADMIN_SECRET_TTL_MS = 20 * 60 * 1000;
 
 let deviceRows = [];
 let tickInterval = null;
+let autoRefreshInterval = null;
 
 function adminSecret() {
   return document.getElementById('adminSecret').value.trim();
@@ -155,6 +175,31 @@ function showMsg(id, text) {
   const el = document.getElementById(id);
   el.textContent = text;
   el.className = text ? 'msg show err' : 'msg';
+}
+
+function restoreAdminSecret() {
+  try {
+    const raw = localStorage.getItem(ADMIN_SECRET_KEY);
+    if (!raw) return false;
+    const { secret, savedAt } = JSON.parse(raw);
+    if (!secret || typeof savedAt !== 'number' || Date.now() - savedAt >= ADMIN_SECRET_TTL_MS) {
+      localStorage.removeItem(ADMIN_SECRET_KEY);
+      return false;
+    }
+    document.getElementById('adminSecret').value = secret;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function saveAdminSecret(secret) {
+  try {
+    localStorage.setItem(ADMIN_SECRET_KEY, JSON.stringify({ secret, savedAt: Date.now() }));
+  } catch (e) {
+    // localStorage unavailable (private browsing, quota) - not fatal,
+    // just means the secret won't survive a refresh this time.
+  }
 }
 
 async function loadDashboard() {
@@ -211,12 +256,31 @@ async function loadDashboard() {
     }));
     const unassignedEntries = unassignedLicenses.map((lic) => ({ device: null, license: lic }));
 
-    deviceRows = [...unassignedEntries, ...deviceEntries];
+    // register_device (nexapos_platform) is a separate, manual "Device
+    // Sync" settings action - it is NOT called automatically when a
+    // license activates. A solo-device shop that never opens that
+    // screen has activated a real license with a real device_id, but
+    // has no row in clients at all - so its license would otherwise
+    // vanish here just like the no-device_id case above, just for a
+    // different reason. Surfaced as its own row with a synthetic device
+    // object carrying only the device_id we actually know.
+    const matchedDeviceIds = new Set(devicesData.devices.map((d) => d.device_id));
+    const orphanedEntries = [...licenseByDevice.entries()]
+      .filter(([deviceId]) => !matchedDeviceIds.has(deviceId))
+      .map(([deviceId, lic]) => ({ device: { device_id: deviceId, unregistered: true }, license: lic }));
 
-    document.getElementById('lastLoaded').textContent = 'Loaded ' + deviceRows.length + ' device(s) at ' + new Date().toLocaleTimeString();
+    deviceRows = [...unassignedEntries, ...orphanedEntries, ...deviceEntries];
+    saveAdminSecret(secret);
+
+    const loadedAt = new Date();
+    document.getElementById('lastLoaded').textContent = 'Loaded ' + deviceRows.length + ' device(s) at ' + loadedAt.toLocaleTimeString();
+    document.getElementById('refreshStatus').textContent = 'Auto-refreshing every 5s - last updated ' + loadedAt.toLocaleTimeString();
     renderRows();
-    if (tickInterval) clearInterval(tickInterval);
-    tickInterval = setInterval(renderRows, 1000);
+    // Started once and left running - re-fetching every loadDashboard()
+    // call used to also tear down and rebuild tickInterval each time,
+    // which just meant needless 1s-interval churn on every 5s auto-tick.
+    if (!tickInterval) tickInterval = setInterval(renderRows, 1000);
+    if (!autoRefreshInterval) autoRefreshInterval = setInterval(loadDashboard, AUTO_REFRESH_MS);
   } catch (e) {
     showMsg('loadMsg', String(e.message || e));
   } finally {
@@ -280,11 +344,14 @@ function renderRows() {
   }
 
   tbody.innerHTML = visible.map(({ device, license }) => {
+    const isUnregistered = device?.unregistered === true;
     const lastSeen = device?.last_seen_at ? new Date(device.last_seen_at.replace(' ', 'T') + 'Z').getTime() : null;
     const online = lastSeen !== null && (Date.now() - lastSeen) < ONLINE_WINDOW_MS;
     const isDisabled = device?.status === 'disabled';
     const statusPill = !device
       ? '<span class="pill nocode">Not yet activated</span>'
+      : isUnregistered
+      ? '<span class="pill nocode">Not registered for sync</span>'
       : isDisabled
       ? '<span class="pill offline">Deleted device</span>'
       : `<span class="pill ${online ? 'online' : 'offline'}">${online ? 'Online' : 'Offline'}</span>`;
@@ -301,14 +368,22 @@ function renderRows() {
     const countdownSource = license && license.status === 'unused' ? license.expires_at : license?.valid_until;
     const expiresIn = license && license.status !== 'revoked' ? formatCountdown(countdownSource) : '-';
 
-    const deleteCell = (!device || isDisabled)
+    // No real clients.id exists to revoke for an unregistered device -
+    // it was never registered on nexapos_platform in the first place.
+    const deleteCell = (!device || isDisabled || isUnregistered)
       ? ''
       : `<button class="delete-btn" onclick="deleteDevice(${device.id}, '${escapeHtml(device.device_label || 'this device').replace(/'/g, "\\'")}')">Delete</button>`;
 
+    const labelCell = !device
+      ? '<span style="color:#aaa">Not yet activated</span>'
+      : isUnregistered
+      ? '<span style="color:#aaa">Activated - not registered for sync</span>'
+      : escapeHtml(device.device_label || 'Unnamed device') + (device.is_owner ? ' <span class="owner-tag">OWNER</span>' : '');
+
     return `<tr>
-      <td>${device ? escapeHtml(device.device_label || 'Unnamed device') + (device.is_owner ? ' <span class="owner-tag">OWNER</span>' : '') : '<span style="color:#aaa">Not yet activated</span>'}</td>
+      <td>${labelCell}</td>
       <td class="mono">${device ? escapeHtml(device.device_id) : '-'}</td>
-      <td>${device ? escapeHtml(device.business_name || ('Shop #' + device.shop_id)) : '-'}</td>
+      <td>${device && !isUnregistered ? escapeHtml(device.business_name || ('Shop #' + device.shop_id)) : '-'}</td>
       <td>${statusPill}</td>
       <td class="mono">${license ? `${escapeHtml(license.code)}<button class="copy-btn" onclick="copyCode('${escapeHtml(license.code).replace(/'/g, "\\'")}', this)">Copy</button>` : '-'}</td>
       <td>${codeStatusPill}</td>
@@ -361,6 +436,11 @@ async function deleteDevice(clientId, label) {
     alert('Could not reach the server: ' + e);
   }
 }
+
+// A remembered, still-fresh secret loads the table immediately - no
+// reason to make the admin click "Load devices" again just because
+// they refreshed the page.
+if (restoreAdminSecret()) loadDashboard();
 </script>
 </body>
 </html>
