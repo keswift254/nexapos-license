@@ -72,6 +72,16 @@
     border-radius: 6px;
   }
   .delete-btn:disabled { opacity: 0.4; cursor: default; }
+  .copy-btn {
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    background: #eef2ff;
+    color: #3730a3;
+    border-radius: 5px;
+    margin-left: 6px;
+  }
+  .copy-btn:disabled { opacity: 0.7; cursor: default; }
   .search-row { margin-bottom: 14px; }
   .search-row input { margin-bottom: 0; }
   .count { font-size: 12px; color: #666; margin-top: 8px; }
@@ -178,11 +188,21 @@ async function loadDashboard() {
     // shown as their own rows instead, newest-first (list_licenses is
     // already ordered that way), so a freshly generated code is visible
     // immediately rather than only appearing once someone activates it.
+    //
+    // A single device_id can legitimately own MORE THAN ONE license_keys
+    // row over its lifetime - revoke doesn't stop that same device from
+    // activating a fresh code later, it just leaves the old row behind
+    // with revoked=1. When that happens, the row that should represent
+    // the device here is whichever is actually current: not-revoked
+    // always beats revoked, and among rows in the same revoked state the
+    // more recently activated one wins. licenseRank() below turns that
+    // into a single comparable number.
     const licenseByDevice = new Map();
     const unassignedLicenses = [];
     for (const lic of licensesData.licenses) {
-      if (lic.device_id) licenseByDevice.set(lic.device_id, lic);
-      else unassignedLicenses.push(lic);
+      if (!lic.device_id) { unassignedLicenses.push(lic); continue; }
+      const current = licenseByDevice.get(lic.device_id);
+      if (!current || licenseRank(lic) > licenseRank(current)) licenseByDevice.set(lic.device_id, lic);
     }
 
     const deviceEntries = devicesData.devices.map((d) => ({
@@ -202,6 +222,16 @@ async function loadDashboard() {
   } finally {
     btn.disabled = false;
   }
+}
+
+// Not-revoked always outranks revoked regardless of recency (a fresh
+// replacement code always wins over an old revoked one), and within the
+// same revoked state, later activation wins. The 1e15 multiplier just
+// needs to dwarf any real epoch-millis value (~1.8e12 today) so the
+// revoked/not-revoked term always decides the comparison first.
+function licenseRank(lic) {
+  const activatedMs = lic.activated_at ? new Date(lic.activated_at.replace(' ', 'T') + 'Z').getTime() : 0;
+  return (Number(lic.revoked) === 1 ? 0 : 1) * 1e15 + activatedMs;
 }
 
 function formatCountdown(validUntilRaw) {
@@ -280,12 +310,24 @@ function renderRows() {
       <td class="mono">${device ? escapeHtml(device.device_id) : '-'}</td>
       <td>${device ? escapeHtml(device.business_name || ('Shop #' + device.shop_id)) : '-'}</td>
       <td>${statusPill}</td>
-      <td class="mono">${license ? escapeHtml(license.code) : '-'}</td>
+      <td class="mono">${license ? `${escapeHtml(license.code)}<button class="copy-btn" onclick="copyCode('${escapeHtml(license.code).replace(/'/g, "\\'")}', this)">Copy</button>` : '-'}</td>
       <td>${codeStatusPill}</td>
       <td>${expiresIn}</td>
       <td>${deleteCell}</td>
     </tr>`;
   }).join('');
+}
+
+async function copyCode(code, btn) {
+  try {
+    await navigator.clipboard.writeText(code);
+    const original = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.disabled = true;
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1200);
+  } catch (e) {
+    alert('Could not copy: ' + e);
+  }
 }
 
 // "Delete" here means the same thing revoke_device already means
