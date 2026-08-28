@@ -23,6 +23,16 @@ $config = [
     'mail_from' => getenv('MAIL_FROM') ?: '',
     'mail_from_name' => getenv('MAIL_FROM_NAME') ?: 'NexaPOS',
     'notify_email' => getenv('NOTIFY_EMAIL') ?: 'condojuniur@outlook.com',
+    // Lets revoke() also cut off a device's platform/sync access, not
+    // just its license - see that action's own comment. Reuses
+    // admin_secret above rather than a separate value: by the operator's
+    // own deliberate choice, nexapos_platform's PLATFORM_ADMIN_SECRET is
+    // already set to this exact same value (a genuinely separate env var
+    // per service, just intentionally matching). If that ever changes on
+    // one side without the other, this call just starts failing
+    // harmlessly (see revoke()'s try/catch) rather than breaking the
+    // license revoke itself.
+    'platform_base_url' => getenv('NEXAPOS_PLATFORM_BASE_URL') ?: 'https://nexapos-platform.onrender.com/index.php',
 ];
 
 $localConfig = __DIR__ . '/license.local.php';

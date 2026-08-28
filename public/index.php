@@ -468,7 +468,19 @@ if ($action === 'verify' && $method === 'POST') {
     jsonResponse(['success' => true, 'valid' => $valid, 'valid_until' => $row['valid_until']]);
 }
 
-/** Admin action - the seller revoking a key after a refund/chargeback. */
+/**
+ * Admin action - the seller revoking a key after a refund/chargeback.
+ * Also best-effort revokes the same device's platform/sync access if
+ * one ever activated this code - otherwise a revoked license only locks
+ * the app's own screens next time it checks in, while the device stays
+ * "online" and able to sync in the background as far as nexapos_platform
+ * is concerned, which doesn't match what an operator means by "revoke
+ * this device". Failure of that secondary call (network hiccup, the
+ * code never having been activated, PLATFORM_ADMIN_SECRET having
+ * drifted out of sync with this service's own admin_secret) must never
+ * block the license revoke itself, which is the part that actually
+ * matters and has already succeeded by the time this runs.
+ */
 if ($action === 'revoke' && $method === 'POST') {
     requireAdmin($licenseConfig);
     $body = requestBody();
@@ -476,8 +488,32 @@ if ($action === 'revoke' && $method === 'POST') {
     if ($code === '') {
         jsonResponse(['success' => false, 'message' => 'code is required.'], 422);
     }
+
+    $existing = $pdo->prepare('SELECT device_id FROM license_keys WHERE code = ?');
+    $existing->execute([$code]);
+    $deviceId = $existing->fetchColumn();
+
     $revoke = $pdo->prepare('UPDATE license_keys SET revoked = 1, revoked_at = UTC_TIMESTAMP() WHERE code = ?');
     $revoke->execute([$code]);
+
+    if ($deviceId) {
+        try {
+            $ch = curl_init(rtrim((string) $licenseConfig['platform_base_url'], '/') . '?action=admin_revoke_device_by_device_id');
+            curl_setopt_array($ch, [
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-Admin-Secret: ' . (string) $licenseConfig['admin_secret']],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 5,
+                CURLOPT_TIMEOUT => 5,
+                CURLOPT_CUSTOMREQUEST => 'POST',
+                CURLOPT_POSTFIELDS => json_encode(['device_id' => $deviceId]),
+            ]);
+            curl_exec($ch);
+            curl_close($ch);
+        } catch (\Throwable $e) {
+            // Swallowed deliberately - see this action's own comment above.
+        }
+    }
+
     jsonResponse(['success' => true, 'revoked' => $revoke->rowCount() === 1]);
 }
 
