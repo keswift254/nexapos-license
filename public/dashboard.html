@@ -324,20 +324,41 @@ function matchesSearch(device, license, query) {
   return haystack.includes(query);
 }
 
+// A real, still-active device only - excludes the "not yet activated"
+// (no device at all) and "not registered for sync" (no clients row)
+// placeholder rows, and excludes disabled ones too (a revoked device
+// isn't meaningfully "offline", it's gone - counting it alongside a
+// device that's merely out of range right now would be misleading).
+function isRealActiveDevice(device) {
+  return !!device && device.unregistered !== true && device.status !== 'disabled';
+}
+
+function isDeviceOnline(device) {
+  if (!isRealActiveDevice(device)) return false;
+  const lastSeen = device.last_seen_at ? new Date(device.last_seen_at.replace(' ', 'T') + 'Z').getTime() : null;
+  return lastSeen !== null && (Date.now() - lastSeen) < ONLINE_WINDOW_MS;
+}
+
 function renderRows() {
   const tbody = document.getElementById('rows');
   const countEl = document.getElementById('rowCount');
   const query = document.getElementById('search').value.trim().toLowerCase();
   const visible = deviceRows.filter(({ device, license }) => matchesSearch(device, license, query));
 
-  countEl.textContent = deviceRows.length
-    ? `Showing ${visible.length} of ${deviceRows.length} device(s)`
-    : '';
-
   if (deviceRows.length === 0) {
+    countEl.textContent = '';
     tbody.innerHTML = '<tr><td colspan="8" style="color:#888">No devices found.</td></tr>';
     return;
   }
+
+  // Counted over the currently-visible (search-filtered) set, same as
+  // "Showing X of Y" already is, so the numbers stay consistent with
+  // whatever the table is actually displaying right now.
+  const onlineCount = visible.filter(({ device }) => isDeviceOnline(device)).length;
+  const offlineCount = visible.filter(({ device }) => isRealActiveDevice(device) && !isDeviceOnline(device)).length;
+  countEl.textContent =
+    `Showing ${visible.length} of ${deviceRows.length} device(s) - ${onlineCount} online, ${offlineCount} offline`;
+
   if (visible.length === 0) {
     tbody.innerHTML = '<tr><td colspan="8" style="color:#888">No devices match your search.</td></tr>';
     return;
@@ -345,8 +366,7 @@ function renderRows() {
 
   tbody.innerHTML = visible.map(({ device, license }) => {
     const isUnregistered = device?.unregistered === true;
-    const lastSeen = device?.last_seen_at ? new Date(device.last_seen_at.replace(' ', 'T') + 'Z').getTime() : null;
-    const online = lastSeen !== null && (Date.now() - lastSeen) < ONLINE_WINDOW_MS;
+    const online = isDeviceOnline(device);
     const isDisabled = device?.status === 'disabled';
     const statusPill = !device
       ? '<span class="pill nocode">Not yet activated</span>'
