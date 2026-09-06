@@ -568,11 +568,20 @@ if ($action === 'extend' && $method === 'POST') {
  * installed copy of the app needs to be able to ask this.
  */
 if ($action === 'latest_version' && $method === 'GET') {
-    $stmt = $pdo->query('SELECT version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
+    try {
+        $stmt = $pdo->query('SELECT version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
+    } catch (\PDOException $e) {
+        // Keep existing installs checking for updates while the one-time
+        // installer-column migration is being applied to the live database.
+        if (($e->errorInfo[1] ?? null) !== 1054) throw $e;
+        $stmt = $pdo->query('SELECT version, windows_url, android_url, windows_sha256, android_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
+    }
     $row = $stmt->fetch();
     if (!$row) {
         jsonResponse(['success' => false, 'message' => 'No version has been published yet.'], 404);
     }
+    $row['windows_installer_url'] = $row['windows_installer_url'] ?? null;
+    $row['windows_installer_sha256'] = $row['windows_installer_sha256'] ?? null;
     jsonResponse(['success' => true] + $row);
 }
 
@@ -614,24 +623,46 @@ if ($action === 'set_latest_version' && $method === 'POST') {
     if ($androidSha256 !== '' && !preg_match('/^[0-9a-f]{64}$/', $androidSha256)) {
         jsonResponse(['success' => false, 'message' => 'android_sha256 must be a 64-character hex SHA-256, or left blank.'], 422);
     }
-    $upsert = $pdo->prepare('
-        INSERT INTO app_version (id, version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, release_notes)
-        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE version = VALUES(version), windows_url = VALUES(windows_url),
-            windows_installer_url = VALUES(windows_installer_url), android_url = VALUES(android_url),
-            windows_sha256 = VALUES(windows_sha256), windows_installer_sha256 = VALUES(windows_installer_sha256),
-            android_sha256 = VALUES(android_sha256), release_notes = VALUES(release_notes)
-    ');
-    $upsert->execute([
-        $version,
-        $windowsUrl,
-        $windowsInstallerUrl !== '' ? $windowsInstallerUrl : null,
-        $androidUrl,
-        $windowsSha256 !== '' ? $windowsSha256 : null,
-        $windowsInstallerSha256 !== '' ? $windowsInstallerSha256 : null,
-        $androidSha256 !== '' ? $androidSha256 : null,
-        $releaseNotes !== '' ? $releaseNotes : null,
-    ]);
+    try {
+        $upsert = $pdo->prepare('
+            INSERT INTO app_version (id, version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, release_notes)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE version = VALUES(version), windows_url = VALUES(windows_url),
+                windows_installer_url = VALUES(windows_installer_url), android_url = VALUES(android_url),
+                windows_sha256 = VALUES(windows_sha256), windows_installer_sha256 = VALUES(windows_installer_sha256),
+                android_sha256 = VALUES(android_sha256), release_notes = VALUES(release_notes)
+        ');
+        $upsert->execute([
+            $version,
+            $windowsUrl,
+            $windowsInstallerUrl !== '' ? $windowsInstallerUrl : null,
+            $androidUrl,
+            $windowsSha256 !== '' ? $windowsSha256 : null,
+            $windowsInstallerSha256 !== '' ? $windowsInstallerSha256 : null,
+            $androidSha256 !== '' ? $androidSha256 : null,
+            $releaseNotes !== '' ? $releaseNotes : null,
+        ]);
+    } catch (\PDOException $e) {
+        if (($e->errorInfo[1] ?? null) !== 1054) throw $e;
+        if ($windowsInstallerUrl !== '' || $windowsInstallerSha256 !== '') {
+            jsonResponse(['success' => false, 'message' => 'The database needs the Windows installer migration before this release can be published. Apply sql/migrations/20260906_002_app_version_installer.sql, then try again.'], 503);
+        }
+        $upsert = $pdo->prepare('
+            INSERT INTO app_version (id, version, windows_url, android_url, windows_sha256, android_sha256, release_notes)
+            VALUES (1, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE version = VALUES(version), windows_url = VALUES(windows_url),
+                android_url = VALUES(android_url), windows_sha256 = VALUES(windows_sha256),
+                android_sha256 = VALUES(android_sha256), release_notes = VALUES(release_notes)
+        ');
+        $upsert->execute([
+            $version,
+            $windowsUrl,
+            $androidUrl,
+            $windowsSha256 !== '' ? $windowsSha256 : null,
+            $androidSha256 !== '' ? $androidSha256 : null,
+            $releaseNotes !== '' ? $releaseNotes : null,
+        ]);
+    }
     jsonResponse(['success' => true]);
 }
 
