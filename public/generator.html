@@ -142,16 +142,16 @@
   </div>
 
   <div class="card">
-    <label for="publishVersion">Publish app update - run once per real release, after the new NexaPOS.apk/NexaPOS-Windows.zip are already pushed to the download site</label>
+    <label for="publishVersion">Publish app update - run once per real release, after the new versioned files are pushed to the download site</label>
     <input id="publishVersion" placeholder="Loading current version..." readonly>
     <label for="publishNotes">Release notes (optional, shown to users)</label>
     <input id="publishNotes" placeholder="What changed">
     <label for="publishWindowsUrl">Windows download URL</label>
-    <input id="publishWindowsUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Windows.zip" onchange="hashPublishFile('windows')">
+    <input id="publishWindowsUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Windows-1.0.12.zip" onchange="hashPublishFile('windows')">
     <label for="publishWindowsSha256">Windows file SHA-256 (computed from the file actually at the URL above)</label>
     <input id="publishWindowsSha256" placeholder="Click \"Fetch & verify files\" below" readonly>
     <label for="publishAndroidUrl">Android download URL</label>
-    <input id="publishAndroidUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS.apk" onchange="hashPublishFile('android')">
+    <input id="publishAndroidUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-1.0.12.apk" onchange="hashPublishFile('android')">
     <label for="publishAndroidSha256">Android file SHA-256 (computed from the file actually at the URL above)</label>
     <input id="publishAndroidSha256" placeholder="Click &quot;Fetch &amp; verify files&quot; below" readonly>
     <button onclick="hashBothPublishFiles()" id="hashFilesBtn">Fetch &amp; verify files</button>
@@ -198,12 +198,20 @@ function incrementPatch(version) {
 // the same bits every time and devices never actually moved version.
 let publishedShas = { windows: null, android: null };
 
+function setSuggestedDownloadUrls(version) {
+  document.getElementById('publishWindowsUrl').value =
+    `https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Windows-${version}.zip`;
+  document.getElementById('publishAndroidUrl').value =
+    `https://keswift254.github.io/nexapos-site/downloads/NexaPOS-${version}.apk`;
+}
+
 async function loadSuggestedVersion() {
   const field = document.getElementById('publishVersion');
   try {
     const res = await fetch(serverUrl() + '?action=latest_version');
     const data = await res.json();
     field.value = data.success && data.version ? incrementPatch(data.version) : '1.0.0';
+    setSuggestedDownloadUrls(field.value);
     if (data.success) {
       publishedShas = { windows: data.windows_sha256 || null, android: data.android_sha256 || null };
     }
