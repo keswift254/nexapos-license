@@ -13,6 +13,7 @@ use PDOException;
 class Database
 {
     private static ?PDO $connection = null;
+    private static bool $installerMigrationChecked = false;
 
     public static function connection(): PDO
     {
@@ -31,7 +32,43 @@ class Database
             self::bootstrapDatabase($db);
             self::$connection = self::newPdo($dsn, $db);
         }
+        self::ensureAppVersionInstaller();
         return self::$connection;
+    }
+
+    private static function ensureAppVersionInstaller(): void
+    {
+        if (self::$installerMigrationChecked) {
+            return;
+        }
+        $pdo = self::$connection;
+        if (!$pdo) {
+            return;
+        }
+        $columns = $pdo->prepare(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'app_version'
+             AND COLUMN_NAME IN ('windows_installer_url', 'windows_installer_sha256')"
+        );
+        $columns->execute();
+        $existing = array_fill_keys($columns->fetchAll(PDO::FETCH_COLUMN), true);
+        $statements = [
+            'windows_installer_url' => 'ALTER TABLE app_version ADD COLUMN windows_installer_url VARCHAR(500) NULL AFTER windows_url',
+            'windows_installer_sha256' => 'ALTER TABLE app_version ADD COLUMN windows_installer_sha256 CHAR(64) NULL AFTER windows_sha256',
+        ];
+        foreach ($statements as $column => $statement) {
+            if (isset($existing[$column])) {
+                continue;
+            }
+            try {
+                $pdo->exec($statement);
+            } catch (PDOException $exception) {
+                if (($exception->errorInfo[1] ?? null) !== 1060) {
+                    throw $exception;
+                }
+            }
+        }
+        self::$installerMigrationChecked = true;
     }
 
     private static function newPdo(string $dsn, array $db): PDO
