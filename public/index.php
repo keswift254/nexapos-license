@@ -568,7 +568,7 @@ if ($action === 'extend' && $method === 'POST') {
  * installed copy of the app needs to be able to ask this.
  */
 if ($action === 'latest_version' && $method === 'GET') {
-    $stmt = $pdo->query('SELECT version, windows_url, android_url, windows_sha256, android_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
+    $stmt = $pdo->query('SELECT version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
     $row = $stmt->fetch();
     if (!$row) {
         jsonResponse(['success' => false, 'message' => 'No version has been published yet.'], 404);
@@ -586,9 +586,11 @@ if ($action === 'set_latest_version' && $method === 'POST') {
     $body = requestBody();
     $version = trim((string) ($body['version'] ?? ''));
     $windowsUrl = trim((string) ($body['windows_url'] ?? ''));
+    $windowsInstallerUrl = trim((string) ($body['windows_installer_url'] ?? ''));
     $androidUrl = trim((string) ($body['android_url'] ?? ''));
     $releaseNotes = trim((string) ($body['release_notes'] ?? ''));
     $windowsSha256 = strtolower(trim((string) ($body['windows_sha256'] ?? '')));
+    $windowsInstallerSha256 = strtolower(trim((string) ($body['windows_installer_sha256'] ?? '')));
     $androidSha256 = strtolower(trim((string) ($body['android_sha256'] ?? '')));
     if ($version === '' || $windowsUrl === '' || $androidUrl === '') {
         jsonResponse(['success' => false, 'message' => 'version, windows_url, and android_url are required.'], 422);
@@ -600,21 +602,33 @@ if ($action === 'set_latest_version' && $method === 'POST') {
     if ($windowsSha256 !== '' && !preg_match('/^[0-9a-f]{64}$/', $windowsSha256)) {
         jsonResponse(['success' => false, 'message' => 'windows_sha256 must be a 64-character hex SHA-256, or left blank.'], 422);
     }
+    if ($windowsInstallerUrl !== '' && !preg_match('/^https:\/\//i', $windowsInstallerUrl)) {
+        jsonResponse(['success' => false, 'message' => 'windows_installer_url must use HTTPS, or be left blank for a ZIP-only bridge release.'], 422);
+    }
+    if ($windowsInstallerSha256 !== '' && !preg_match('/^[0-9a-f]{64}$/', $windowsInstallerSha256)) {
+        jsonResponse(['success' => false, 'message' => 'windows_installer_sha256 must be a 64-character hex SHA-256, or left blank.'], 422);
+    }
+    if ($windowsInstallerUrl !== '' && $windowsInstallerSha256 === '') {
+        jsonResponse(['success' => false, 'message' => 'windows_installer_sha256 is required when windows_installer_url is supplied.'], 422);
+    }
     if ($androidSha256 !== '' && !preg_match('/^[0-9a-f]{64}$/', $androidSha256)) {
         jsonResponse(['success' => false, 'message' => 'android_sha256 must be a 64-character hex SHA-256, or left blank.'], 422);
     }
     $upsert = $pdo->prepare('
-        INSERT INTO app_version (id, version, windows_url, android_url, windows_sha256, android_sha256, release_notes)
-        VALUES (1, ?, ?, ?, ?, ?, ?)
+        INSERT INTO app_version (id, version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, release_notes)
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE version = VALUES(version), windows_url = VALUES(windows_url),
-            android_url = VALUES(android_url), windows_sha256 = VALUES(windows_sha256),
+            windows_installer_url = VALUES(windows_installer_url), android_url = VALUES(android_url),
+            windows_sha256 = VALUES(windows_sha256), windows_installer_sha256 = VALUES(windows_installer_sha256),
             android_sha256 = VALUES(android_sha256), release_notes = VALUES(release_notes)
     ');
     $upsert->execute([
         $version,
         $windowsUrl,
+        $windowsInstallerUrl !== '' ? $windowsInstallerUrl : null,
         $androidUrl,
         $windowsSha256 !== '' ? $windowsSha256 : null,
+        $windowsInstallerSha256 !== '' ? $windowsInstallerSha256 : null,
         $androidSha256 !== '' ? $androidSha256 : null,
         $releaseNotes !== '' ? $releaseNotes : null,
     ]);

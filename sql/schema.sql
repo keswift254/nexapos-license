@@ -85,8 +85,10 @@ CREATE TABLE IF NOT EXISTS app_version (
     id TINYINT NOT NULL PRIMARY KEY DEFAULT 1,
     version VARCHAR(20) NOT NULL,
     windows_url VARCHAR(500) NOT NULL,
+    windows_installer_url VARCHAR(500) NULL,
     android_url VARCHAR(500) NOT NULL,
     windows_sha256 CHAR(64) NULL,
+    windows_installer_sha256 CHAR(64) NULL,
     android_sha256 CHAR(64) NULL,
     release_notes TEXT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
