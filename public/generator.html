@@ -165,7 +165,36 @@
     <div class="msg" id="publishMsg"></div>
   </div>
 
+  <div class="card">
+    <label for="recoveryDevice">Support recovery - device ID</label>
+    <input id="recoveryDevice" placeholder="Device ID from the client's login or authenticator screen">
+    <button onclick="supportRecovery('reset_authenticator')">Reset authenticator</button>
+    <button onclick="supportRecovery('issue_support_access')" style="margin-top:10px">Generate super admin recovery password</button>
+    <div class="msg" id="recoveryMsg"></div>
+    <input id="recoveryPassword" readonly aria-label="One-time support password" hidden>
+  </div>
 <script>
+async function supportRecovery(action) {
+  const deviceId = document.getElementById('recoveryDevice').value.trim();
+  if (!deviceId) return showMsg('recoveryMsg', 'Enter the device ID.', false);
+  const password = document.getElementById('recoveryPassword');
+  password.hidden = true;
+  password.value = '';
+  try {
+    const response = await fetch(serverUrl() + '?action=' + action, {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: deviceId }),
+    });
+    const data = await response.json();
+    showMsg('recoveryMsg', data.message || 'Recovery request failed.', data.success === true);
+    if (data.success && data.password) {
+      password.hidden = false;
+      password.value = data.password;
+      showMsg('recoveryMsg', 'Username: nexapos-support. ' + data.message, true);
+    }
+  } catch (_) { showMsg('recoveryMsg', 'Could not reach the server. Try again.', false); }
+}
 let countdownInterval = null;
 
 // Defaults to wherever this page is actually being served from (local

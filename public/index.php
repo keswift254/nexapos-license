@@ -15,6 +15,7 @@ spl_autoload_register(function (string $class): void {
 
 use License\Core\Database;
 use License\Core\LicenseCode;
+use License\Core\SupportRecovery;
 use License\Services\Mailer;
 
 function jsonResponse(array $payload, int $status = 200): void
@@ -396,7 +397,18 @@ if ($action === 'activate' && $method === 'POST') {
         jsonResponse(['success' => false, 'message' => 'This license key has been revoked.'], 422);
     }
     if ($row['device_id'] !== null) {
-        jsonResponse(['success' => false, 'message' => 'This license key has already been used.'], 422);
+        if (!hash_equals((string) $row['device_id'], $deviceId)) {
+            jsonResponse(['success' => false, 'message' => 'This license belongs to another device. Contact support with your device ID.'], 422);
+        }
+        $activationToken = bin2hex(random_bytes(32));
+        $renew = $pdo->prepare('UPDATE license_keys SET activation_token_hash = ?
+            WHERE code = ? AND device_id = ? AND revoked = 0
+            AND (valid_until IS NULL OR valid_until > UTC_TIMESTAMP())');
+        $renew->execute([hash('sha256', $activationToken), $code, $deviceId]);
+        if ($renew->rowCount() !== 1) {
+            jsonResponse(['success' => false, 'message' => 'This license has expired. Ask support to extend it first.'], 422);
+        }
+        jsonResponse(['success' => true, 'activation_token' => $activationToken, 'valid_until' => $row['valid_until']]);
     }
     // ' UTC' is load-bearing: license_keys.expires_at is written via
     // MySQL's UTC_TIMESTAMP(), but this server's PHP default timezone is
@@ -455,7 +467,7 @@ if ($action === 'verify' && $method === 'POST') {
         jsonResponse(['success' => false, 'valid' => false, 'message' => 'Missing activation token.'], 401);
     }
 
-    $stmt = $pdo->prepare('SELECT revoked, valid_until FROM license_keys WHERE activation_token_hash = ?');
+    $stmt = $pdo->prepare('SELECT revoked, valid_until, device_id FROM license_keys WHERE activation_token_hash = ?');
     $stmt->execute([hash('sha256', $token)]);
     $row = $stmt->fetch();
     if (!$row) {
@@ -465,7 +477,54 @@ if ($action === 'verify' && $method === 'POST') {
     // Same ' UTC' timezone gotcha as activate()'s expiry check above.
     $expired = $row['valid_until'] !== null && strtotime((string) $row['valid_until'] . ' UTC') < time();
     $valid = (int) $row['revoked'] === 0 && !$expired;
-    jsonResponse(['success' => true, 'valid' => $valid, 'valid_until' => $row['valid_until']]);
+    jsonResponse(['success' => true, 'valid' => $valid, 'valid_until' => $row['valid_until'],
+        'authenticator_generation' => $valid ? SupportRecovery::generation($pdo, (string) $row['device_id']) : 0]);
+}
+
+if (in_array($action, ['reset_authenticator', 'issue_support_access'], true) && $method === 'POST') {
+    requireAdmin($licenseConfig);
+    $deviceId = trim((string) (requestBody()['device_id'] ?? ''));
+    if ($deviceId === '' || strlen($deviceId) > 190) {
+        jsonResponse(['success' => false, 'message' => 'Enter a valid device ID.'], 422);
+    }
+    $licensed = $pdo->prepare('SELECT 1 FROM license_keys WHERE device_id = ? AND revoked = 0
+        AND (valid_until IS NULL OR valid_until > UTC_TIMESTAMP()) LIMIT 1');
+    $licensed->execute([$deviceId]);
+    if (!$licensed->fetchColumn()) {
+        jsonResponse(['success' => false, 'message' => 'No active license for this device. Renew its license first.'], 422);
+    }
+    SupportRecovery::ensureSchema($pdo);
+    if ($action === 'reset_authenticator') {
+        $pdo->prepare('INSERT INTO device_security_recovery (device_id, authenticator_generation) VALUES (?, 1)
+            ON DUPLICATE KEY UPDATE authenticator_generation = authenticator_generation + 1')->execute([$deviceId]);
+        jsonResponse(['success' => true, 'message' => 'Reset queued. On the device, connect to the internet and click Check for approved reset.']);
+    }
+    $code = bin2hex(random_bytes(24));
+    $pdo->prepare('INSERT INTO device_security_recovery (device_id, access_hash, access_expires_at) VALUES (?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 15 MINUTE))
+        ON DUPLICATE KEY UPDATE access_hash = VALUES(access_hash), access_expires_at = VALUES(access_expires_at), access_used_at = NULL')
+        ->execute([$deviceId, hash('sha256', $code)]);
+    jsonResponse(['success' => true, 'username' => 'nexapos-support', 'password' => $code,
+        'message' => 'One-time support password. Expires in 15 minutes; bound to this device.']);
+}
+
+if ($action === 'redeem_support_access' && $method === 'POST') {
+    $body = requestBody();
+    $deviceId = trim((string) ($body['device_id'] ?? ''));
+    $code = trim((string) ($body['password'] ?? ''));
+    $token = preg_replace('/^Bearer\s+/i', '', trim(headerValue('Authorization')));
+    if (!preg_match('/^[a-f0-9]{48}$/D', $code) || $deviceId === '' || $token === '') {
+        jsonResponse(['success' => false, 'message' => 'Invalid support credentials.'], 401);
+    }
+    SupportRecovery::ensureSchema($pdo);
+    $redeem = $pdo->prepare('UPDATE device_security_recovery r SET access_hash = NULL, access_used_at = UTC_TIMESTAMP()
+        WHERE r.device_id = ? AND r.access_hash = ? AND r.access_expires_at > UTC_TIMESTAMP()
+        AND EXISTS (SELECT 1 FROM license_keys k WHERE k.device_id = r.device_id
+          AND k.activation_token_hash = ? AND k.revoked = 0 AND (k.valid_until IS NULL OR k.valid_until > UTC_TIMESTAMP()))');
+    $redeem->execute([$deviceId, hash('sha256', $code), hash('sha256', $token)]);
+    if ($redeem->rowCount() !== 1) {
+        jsonResponse(['success' => false, 'message' => 'Support password expired, already used, or belongs to another device.'], 401);
+    }
+    jsonResponse(['success' => true]);
 }
 
 /**
