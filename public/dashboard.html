@@ -269,7 +269,8 @@ async function loadDashboard() {
       .filter(([deviceId]) => !matchedDeviceIds.has(deviceId))
       .map(([deviceId, lic]) => ({ device: { device_id: deviceId, unregistered: true }, license: lic }));
 
-    deviceRows = [...unassignedEntries, ...orphanedEntries, ...deviceEntries];
+    deviceRows = [...unassignedEntries, ...orphanedEntries, ...deviceEntries]
+      .sort((a, b) => entryCreatedAt(b) - entryCreatedAt(a));
     saveAdminSecret(secret);
 
     const loadedAt = new Date();
@@ -296,6 +297,13 @@ async function loadDashboard() {
 function licenseRank(lic) {
   const activatedMs = lic.activated_at ? new Date(lic.activated_at.replace(' ', 'T') + 'Z').getTime() : 0;
   return (Number(lic.revoked) === 1 ? 0 : 1) * 1e15 + activatedMs;
+}
+
+function entryCreatedAt({ device, license }) {
+  const raw = device?.created_at || license?.activated_at || license?.issued_at;
+  if (!raw) return 0;
+  const timestamp = new Date(raw.replace(' ', 'T') + 'Z').getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function formatCountdown(validUntilRaw) {
