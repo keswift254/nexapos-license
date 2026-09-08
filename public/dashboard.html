@@ -381,13 +381,17 @@ function renderRows() {
       : isUnregistered
       ? '<span class="pill nocode">Not registered for sync</span>'
       : isDisabled
-      ? '<span class="pill offline">Deleted device</span>'
+      ? '<span class="pill offline">Removed / disabled</span>'
       : `<span class="pill ${online ? 'online' : 'offline'}">${online ? 'Online' : 'Offline'}</span>`;
 
     const codeStatusMap = { used: 'Used', extended: 'Extended', revoked: 'Revoked', unused: 'Unused' };
     const codeStatusPill = license
       ? `<span class="pill ${license.status}">${codeStatusMap[license.status] || license.status}</span>`
-      : '<span class="pill nocode">No code yet</span>';
+      : device && Number(device.is_owner) === 0
+        ? (device.status === 'disabled'
+          ? '<span class="pill revoked">Shop access removed - activation required</span>'
+          : '<span class="pill active">Joined shop (no standalone license)</span>')
+        : '<span class="pill nocode">Activation required</span>';
 
     // Unused codes haven't been activated yet, so valid_until (only set
     // at activation) is still null - expires_at (the issue-time
@@ -406,7 +410,7 @@ function renderRows() {
       ? '<span style="color:#aaa">Not yet activated</span>'
       : isUnregistered
       ? '<span style="color:#aaa">Activated - not registered for sync</span>'
-      : escapeHtml(device.device_label || 'Unnamed device') + (device.is_owner ? ' <span class="owner-tag">OWNER</span>' : '');
+      : escapeHtml(device.device_label || 'Unnamed device') + (Number(device.is_owner) === 1 ? ' <span class="owner-tag">OWNER</span>' : '');
 
     return `<tr>
       <td>${labelCell}</td>
