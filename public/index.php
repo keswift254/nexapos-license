@@ -267,6 +267,47 @@ if ($action === 'register_lead' && $method === 'POST') {
     jsonResponse(['success' => true]);
 }
 
+/**
+ * Public lookup from the marketing/download site for an already-
+ * registered lead who just wants back to the download links, without
+ * re-submitting the full form - re-submitting the same email through
+ * register_lead above already fails on the leads.email UNIQUE
+ * constraint today, leaving a returning visitor stuck. Confirms
+ * existence only - never returns the lead's own stored name/business/
+ * phone back to an unauthenticated caller, since anyone can call this.
+ */
+if ($action === 'check_lead' && $method === 'POST') {
+    $body = requestBody();
+    $email = trim((string) ($body['email'] ?? ''));
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        jsonResponse(['success' => false, 'message' => 'Enter a valid email address.'], 422);
+    }
+
+    // Shares register_lead's own IP throttle pool (same table, same
+    // limit) rather than a separate counter - confirming/denying
+    // whether an email is registered is itself a small enumeration
+    // surface worth rate limiting, same spirit as that existing check,
+    // and a combined per-IP budget across both lead actions is simpler
+    // than maintaining two.
+    $ip = trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+    if ($ip !== '') {
+        $recent = $pdo->prepare('SELECT COUNT(*) FROM lead_attempts WHERE ip_address = ? AND attempted_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)');
+        $recent->execute([$ip]);
+        if ((int) $recent->fetchColumn() >= 5) {
+            jsonResponse(['success' => false, 'message' => 'Too many attempts from this connection. Try again later.'], 429);
+        }
+        $log = $pdo->prepare('INSERT INTO lead_attempts (ip_address) VALUES (?)');
+        $log->execute([$ip]);
+    }
+
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM leads WHERE email = ?');
+    $stmt->execute([$email]);
+    if ((int) $stmt->fetchColumn() === 0) {
+        jsonResponse(['success' => false, 'message' => "We don't have that email on file. Register below instead."], 404);
+    }
+    jsonResponse(['success' => true]);
+}
+
 /** Admin action - see who has registered so far. */
 if ($action === 'list_leads' && $method === 'GET') {
     requireAdmin($licenseConfig);
