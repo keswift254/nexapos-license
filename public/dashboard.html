@@ -14,7 +14,10 @@
     color: #1a1a1a;
   }
   h1 { font-size: 20px; margin-bottom: 4px; }
+  h2 { font-size: 15px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+  h2 .section-count { font-size: 12px; font-weight: 500; color: #888; }
   p.sub { color: #666; font-size: 13px; margin-top: 0; }
+  p.section-sub { color: #888; font-size: 12px; margin: 0 0 10px; }
   .card {
     background: #fff;
     border-radius: 12px;
@@ -54,6 +57,7 @@
   th { color: #666; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.02em; }
   td.mono { font-family: monospace; font-size: 12px; }
   .table-wrap { overflow-x: auto; }
+  .empty-row td { color: #888; }
 
   .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
   .pill.online { background: #dcfce7; color: #166534; }
@@ -87,7 +91,6 @@
   .search-row input { margin-bottom: 0; }
   #refreshBtn { background: #eef2ff; color: #3730a3; white-space: nowrap; }
   .refresh-status { font-size: 12px; color: #666; margin-bottom: 14px; }
-  .count { font-size: 12px; color: #666; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -121,26 +124,68 @@
       <button id="refreshBtn" onclick="loadDashboard()">Refresh</button>
     </div>
     <div class="refresh-status" id="refreshStatus"></div>
+  </div>
+
+  <!-- Online: a device only ever lands here if it has a real clients row
+       (i.e. it was actually registered/activated at some point) AND its
+       last_seen_at is recent - see isRealActiveDevice/isDeviceOnline. -->
+  <div class="card">
+    <h2>Online devices <span class="section-count" id="onlineCount"></span></h2>
+    <p class="section-sub">Checked in within the last 5 minutes. "Online for" is time since that last check-in, not a tracked session start - there's no continuous "online since" moment recorded server-side, only recency of the last authenticated call.</p>
     <div class="table-wrap">
       <table>
-        <thead>
-          <tr>
-            <th>Device label</th>
-            <th>Device ID</th>
-            <th>Shop</th>
-            <th>Status</th>
-            <th>Activation code</th>
-            <th>Code status</th>
-            <th>Expires in</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="rows">
-          <tr><td colspan="8" style="color:#888">Enter your admin secret above and click "Load devices".</td></tr>
-        </tbody>
+        <thead><tr>
+          <th>Device label</th><th>Device ID</th><th>Shop</th><th>Online for</th>
+          <th>Activation code</th><th>Code status</th><th></th>
+        </tr></thead>
+        <tbody id="onlineRows"></tbody>
       </table>
     </div>
-    <div class="count" id="rowCount"></div>
+  </div>
+
+  <!-- Offline: same "must be a real, registered client" requirement as
+       Online - a device that was never activated/registered never
+       appears here, it belongs in Unregistered instead. -->
+  <div class="card">
+    <h2>Offline devices <span class="section-count" id="offlineCount"></span></h2>
+    <p class="section-sub">Previously activated and registered, but hasn't checked in within the last 5 minutes.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Device label</th><th>Device ID</th><th>Shop</th><th>Last seen</th>
+          <th>Activation code</th><th>Code status</th><th></th>
+        </tr></thead>
+        <tbody id="offlineRows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Unregistered devices <span class="section-count" id="unregisteredCount"></span></h2>
+    <p class="section-sub">No real device row on nexapos_platform yet - either a license code that's never been activated on any device, or a device_id that activated a license but never opened Device Sync to register.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Device label</th><th>Device ID</th><th>Status</th>
+          <th>Activation code</th><th>Code status</th><th>Expires in</th>
+        </tr></thead>
+        <tbody id="unregisteredRows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Removed devices <span class="section-count" id="disabledCount"></span></h2>
+    <p class="section-sub">Deleted from this dashboard (or revoked elsewhere) - disabled permanently, kept here only for reference.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Device label</th><th>Device ID</th><th>Shop</th>
+          <th>Activation code</th><th>Code status</th>
+        </tr></thead>
+        <tbody id="disabledRows"></tbody>
+      </table>
+    </div>
   </div>
 
 <script>
@@ -306,18 +351,45 @@ function entryCreatedAt({ device, license }) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+function parseServerDate(raw) {
+  if (!raw) return null;
+  const ms = new Date(raw.replace(' ', 'T') + 'Z').getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
 function formatCountdown(validUntilRaw) {
   if (!validUntilRaw) return 'Never expires';
-  const target = new Date(validUntilRaw.replace(' ', 'T') + 'Z').getTime();
+  const target = parseServerDate(validUntilRaw);
   const remaining = target - Date.now();
   if (remaining <= 0) return 'Expired';
-  const d = Math.floor(remaining / 86400000);
-  const h = Math.floor((remaining % 86400000) / 3600000);
-  const m = Math.floor((remaining % 3600000) / 60000);
-  const s = Math.floor((remaining % 60000) / 1000);
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  return `${m}m ${s}s`;
+  return formatDuration(remaining) + ' left';
+}
+
+// Shared by "online for"/"last seen" (elapsed since a past timestamp)
+// and the expiry countdown (remaining until a future one) - same units,
+// just fed a different sign of gap.
+function formatDuration(ms) {
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor((ms % 86400000) / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+// Elapsed time since last_seen_at, for both the Online and Offline
+// sections - "how long online" and "when last seen" are the same
+// underlying signal (recency of the last authenticated call), just
+// framed differently per section since there's no separate "came
+// online at" moment tracked server-side. Null only when a device
+// registered but has never made a second authenticated call yet (the
+// one that would actually stamp last_seen_at).
+function formatLastSeen(device) {
+  const lastSeen = parseServerDate(device.last_seen_at);
+  if (lastSeen === null) return 'Never';
+  return formatDuration(Math.max(0, Date.now() - lastSeen)) + ' ago';
 }
 
 function escapeHtml(s) {
@@ -334,95 +406,145 @@ function matchesSearch(device, license, query) {
 
 // A real, still-active device only - excludes the "not yet activated"
 // (no device at all) and "not registered for sync" (no clients row)
-// placeholder rows, and excludes disabled ones too (a revoked device
-// isn't meaningfully "offline", it's gone - counting it alongside a
-// device that's merely out of range right now would be misleading).
+// placeholder rows, and excludes disabled ones too (handled as its own
+// Removed section instead).
 function isRealActiveDevice(device) {
   return !!device && device.unregistered !== true && device.status !== 'disabled';
 }
 
+function isNeverRegistered(device) {
+  return !device || device.unregistered === true;
+}
+
+function isDisabledDevice(device) {
+  return !!device && device.status === 'disabled';
+}
+
 function isDeviceOnline(device) {
   if (!isRealActiveDevice(device)) return false;
-  const lastSeen = device.last_seen_at ? new Date(device.last_seen_at.replace(' ', 'T') + 'Z').getTime() : null;
+  const lastSeen = parseServerDate(device.last_seen_at);
   return lastSeen !== null && (Date.now() - lastSeen) < ONLINE_WINDOW_MS;
 }
 
+function codeCells(license) {
+  const codeStatusMap = { used: 'Used', extended: 'Extended', revoked: 'Revoked', unused: 'Unused' };
+  const codeCell = license
+    ? `${escapeHtml(license.code)}<button class="copy-btn" onclick="copyCode('${escapeHtml(license.code).replace(/'/g, "\\'")}', this)">Copy</button>`
+    : '-';
+  const statusCell = license
+    ? `<span class="pill ${license.status}">${codeStatusMap[license.status] || license.status}</span>`
+    : '-';
+  return { codeCell, statusCell };
+}
+
+function deleteButton(device) {
+  // No real clients.id exists to revoke for an unregistered device - it
+  // was never registered on nexapos_platform in the first place.
+  if (!device || isNeverRegistered(device) || isDisabledDevice(device)) return '';
+  return `<button class="delete-btn" onclick="deleteDevice(${device.id}, '${escapeHtml(device.device_label || 'this device').replace(/'/g, "\\'")}')">Delete</button>`;
+}
+
+function labelOf(device) {
+  return escapeHtml(device.device_label || 'Unnamed device') +
+    (Number(device.is_owner) === 1 ? ' <span class="owner-tag">OWNER</span>' : '');
+}
+
+function shopOf(device) {
+  return escapeHtml(device.business_name || ('Shop #' + device.shop_id));
+}
+
+function renderEmptyRow(tbodyId, colspan, message) {
+  document.getElementById(tbodyId).innerHTML =
+    `<tr class="empty-row"><td colspan="${colspan}">${message}</td></tr>`;
+}
+
 function renderRows() {
-  const tbody = document.getElementById('rows');
-  const countEl = document.getElementById('rowCount');
   const query = document.getElementById('search').value.trim().toLowerCase();
   const visible = deviceRows.filter(({ device, license }) => matchesSearch(device, license, query));
 
-  if (deviceRows.length === 0) {
-    countEl.textContent = '';
-    tbody.innerHTML = '<tr><td colspan="8" style="color:#888">No devices found.</td></tr>';
-    return;
+  const online = visible.filter(({ device }) => isDeviceOnline(device));
+  const offline = visible.filter(({ device }) => isRealActiveDevice(device) && !isDeviceOnline(device));
+  const unregistered = visible.filter(({ device }) => isNeverRegistered(device));
+  const disabled = visible.filter(({ device }) => isDisabledDevice(device));
+
+  document.getElementById('onlineCount').textContent = `(${online.length})`;
+  document.getElementById('offlineCount').textContent = `(${offline.length})`;
+  document.getElementById('unregisteredCount').textContent = `(${unregistered.length})`;
+  document.getElementById('disabledCount').textContent = `(${disabled.length})`;
+
+  if (online.length === 0) {
+    renderEmptyRow('onlineRows', 7, 'No online devices right now.');
+  } else {
+    document.getElementById('onlineRows').innerHTML = online.map(({ device, license }) => {
+      const { codeCell, statusCell } = codeCells(license);
+      return `<tr>
+        <td>${labelOf(device)}</td>
+        <td class="mono">${escapeHtml(device.device_id)}</td>
+        <td>${shopOf(device)}</td>
+        <td>${formatLastSeen(device)}</td>
+        <td class="mono">${codeCell}</td>
+        <td>${statusCell}</td>
+        <td>${deleteButton(device)}</td>
+      </tr>`;
+    }).join('');
   }
 
-  // Counted over the currently-visible (search-filtered) set, same as
-  // "Showing X of Y" already is, so the numbers stay consistent with
-  // whatever the table is actually displaying right now.
-  const onlineCount = visible.filter(({ device }) => isDeviceOnline(device)).length;
-  const offlineCount = visible.filter(({ device }) => isRealActiveDevice(device) && !isDeviceOnline(device)).length;
-  countEl.textContent =
-    `Showing ${visible.length} of ${deviceRows.length} device(s) - ${onlineCount} online, ${offlineCount} offline`;
-
-  if (visible.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="color:#888">No devices match your search.</td></tr>';
-    return;
+  if (offline.length === 0) {
+    renderEmptyRow('offlineRows', 7, 'No offline devices.');
+  } else {
+    document.getElementById('offlineRows').innerHTML = offline.map(({ device, license }) => {
+      const { codeCell, statusCell } = codeCells(license);
+      return `<tr>
+        <td>${labelOf(device)}</td>
+        <td class="mono">${escapeHtml(device.device_id)}</td>
+        <td>${shopOf(device)}</td>
+        <td>${formatLastSeen(device)}</td>
+        <td class="mono">${codeCell}</td>
+        <td>${statusCell}</td>
+        <td>${deleteButton(device)}</td>
+      </tr>`;
+    }).join('');
   }
 
-  tbody.innerHTML = visible.map(({ device, license }) => {
-    const isUnregistered = device?.unregistered === true;
-    const online = isDeviceOnline(device);
-    const isDisabled = device?.status === 'disabled';
-    const statusPill = !device
-      ? '<span class="pill nocode">Not yet activated</span>'
-      : isUnregistered
-      ? '<span class="pill nocode">Not registered for sync</span>'
-      : isDisabled
-      ? '<span class="pill offline">Removed / disabled</span>'
-      : `<span class="pill ${online ? 'online' : 'offline'}">${online ? 'Online' : 'Offline'}</span>`;
+  if (unregistered.length === 0) {
+    renderEmptyRow('unregisteredRows', 6, 'No unregistered devices or unused codes.');
+  } else {
+    document.getElementById('unregisteredRows').innerHTML = unregistered.map(({ device, license }) => {
+      const isOrphan = device?.unregistered === true;
+      const label = isOrphan
+        ? '<span style="color:#aaa">Activated - not registered for sync</span>'
+        : '<span style="color:#aaa">Not yet activated</span>';
+      const statusPill = isOrphan
+        ? '<span class="pill nocode">Not registered for sync</span>'
+        : '<span class="pill nocode">Not yet activated</span>';
+      const countdownSource = license && license.status === 'unused' ? license.expires_at : license?.valid_until;
+      const expiresIn = license && license.status !== 'revoked' ? formatCountdown(countdownSource) : '-';
+      const { codeCell, statusCell } = codeCells(license);
+      return `<tr>
+        <td>${label}</td>
+        <td class="mono">${device ? escapeHtml(device.device_id) : '-'}</td>
+        <td>${statusPill}</td>
+        <td class="mono">${codeCell}</td>
+        <td>${statusCell}</td>
+        <td>${expiresIn}</td>
+      </tr>`;
+    }).join('');
+  }
 
-    const codeStatusMap = { used: 'Used', extended: 'Extended', revoked: 'Revoked', unused: 'Unused' };
-    const codeStatusPill = license
-      ? `<span class="pill ${license.status}">${codeStatusMap[license.status] || license.status}</span>`
-      : device && Number(device.is_owner) === 0
-        ? (device.status === 'disabled'
-          ? '<span class="pill revoked">Shop access removed - activation required</span>'
-          : '<span class="pill active">Joined shop (no standalone license)</span>')
-        : '<span class="pill nocode">Activation required</span>';
-
-    // Unused codes haven't been activated yet, so valid_until (only set
-    // at activation) is still null - expires_at (the issue-time
-    // redemption window from the issue action) is the real countdown
-    // for those. Every other status already has a meaningful valid_until.
-    const countdownSource = license && license.status === 'unused' ? license.expires_at : license?.valid_until;
-    const expiresIn = license && license.status !== 'revoked' ? formatCountdown(countdownSource) : '-';
-
-    // No real clients.id exists to revoke for an unregistered device -
-    // it was never registered on nexapos_platform in the first place.
-    const deleteCell = (!device || isDisabled || isUnregistered)
-      ? ''
-      : `<button class="delete-btn" onclick="deleteDevice(${device.id}, '${escapeHtml(device.device_label || 'this device').replace(/'/g, "\\'")}')">Delete</button>`;
-
-    const labelCell = !device
-      ? '<span style="color:#aaa">Not yet activated</span>'
-      : isUnregistered
-      ? '<span style="color:#aaa">Activated - not registered for sync</span>'
-      : escapeHtml(device.device_label || 'Unnamed device') + (Number(device.is_owner) === 1 ? ' <span class="owner-tag">OWNER</span>' : '');
-
-    return `<tr>
-      <td>${labelCell}</td>
-      <td class="mono">${device ? escapeHtml(device.device_id) : '-'}</td>
-      <td>${device && !isUnregistered ? escapeHtml(device.business_name || ('Shop #' + device.shop_id)) : '-'}</td>
-      <td>${statusPill}</td>
-      <td class="mono">${license ? `${escapeHtml(license.code)}<button class="copy-btn" onclick="copyCode('${escapeHtml(license.code).replace(/'/g, "\\'")}', this)">Copy</button>` : '-'}</td>
-      <td>${codeStatusPill}</td>
-      <td>${expiresIn}</td>
-      <td>${deleteCell}</td>
-    </tr>`;
-  }).join('');
+  if (disabled.length === 0) {
+    renderEmptyRow('disabledRows', 5, 'No removed devices.');
+  } else {
+    document.getElementById('disabledRows').innerHTML = disabled.map(({ device, license }) => {
+      const { codeCell, statusCell } = codeCells(license);
+      return `<tr>
+        <td>${labelOf(device)}</td>
+        <td class="mono">${escapeHtml(device.device_id)}</td>
+        <td>${shopOf(device)}</td>
+        <td class="mono">${codeCell}</td>
+        <td>${statusCell}</td>
+      </tr>`;
+    }).join('');
+  }
 }
 
 async function copyCode(code, btn) {
