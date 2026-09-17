@@ -749,6 +749,23 @@ async function extendLicense() {
   }
 }
 
+// HEAD-only, not the full GET sha256OfUrl does - this just needs to
+// know the URL resolves to something before shipping it to every
+// installed device, not verify its exact contents. Added after a real
+// incident: the version field auto-advancing (loadSuggestedVersion)
+// also re-guesses both URLs to match the new version number
+// (setSuggestedDownloadUrls), and publishing straight from that guess
+// without noticing the file was never actually built/uploaded at that
+// exact URL put a 404 in front of every device's update check.
+async function urlExists(url) {
+  try {
+    const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function publishVersion() {
   const version = document.getElementById('publishVersion').value.trim();
   const windowsInstallerUrl = document.getElementById('publishWindowsInstallerUrl').value.trim();
@@ -769,6 +786,23 @@ async function publishVersion() {
     // every installed device, so it gets its own belt-and-suspenders
     // check rather than trusting button-disabled state alone.
     showMsg('publishMsg', 'Both SHA-256 fields need a valid 64-character hash - paste one in, or click "Fetch & verify files".', false);
+    return;
+  }
+  const publishBtn = document.getElementById('publishBtn');
+  publishBtn.disabled = true;
+  showMsg('publishMsg', 'Checking that both URLs actually exist before publishing…', true);
+  const [windowsInstallerOk, androidOk] = await Promise.all([
+    urlExists(windowsInstallerUrl),
+    urlExists(androidUrl),
+  ]);
+  if (!windowsInstallerOk || !androidOk) {
+    const which = [!windowsInstallerOk && 'Windows setup EXE', !androidOk && 'Android'].filter(Boolean).join(', ');
+    showMsg(
+      'publishMsg',
+      `${which} URL doesn't actually resolve (404 or unreachable) - this is exactly what put a broken update in front of every device last time. Fix the URL before publishing.`,
+      false,
+    );
+    updatePublishButtonState();
     return;
   }
   try {
@@ -796,9 +830,11 @@ async function publishVersion() {
       document.getElementById('publishBtn').disabled = true;
     } else {
       showMsg('publishMsg', data.message || 'Could not publish the update.', false);
+      updatePublishButtonState();
     }
   } catch (e) {
     showMsg('publishMsg', 'Could not reach the license server: ' + e, false);
+    updatePublishButtonState();
   }
 }
 </script>
