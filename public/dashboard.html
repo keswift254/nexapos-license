@@ -4,98 +4,179 @@
 <meta charset="UTF-8">
 <title>NexaPOS Device Dashboard</title>
 <style>
-  :root { color-scheme: light dark; }
+  :root {
+    color-scheme: light dark;
+    --bg: #f2f3f8;
+    --bg-accent: radial-gradient(circle at 15% -10%, rgba(99,102,241,0.12), transparent 45%);
+    --card-bg: #ffffff;
+    --card-border: rgba(15, 23, 42, 0.06);
+    --text: #14162b;
+    --muted: #6b7280;
+    --field-bg: #ffffff;
+    --field-border: #dfe2ec;
+    --field-focus: #6366f1;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --accent-soft: #eef2ff;
+    --accent-soft-text: #3730a3;
+    --danger: #dc2626;
+    --danger-hover: #b91c1c;
+    --danger-soft: #fee2e2;
+    --danger-soft-text: #991b1b;
+    --success-soft: #dcfce7;
+    --success-text: #166534;
+    --warn-soft: #fef9c3;
+    --warn-text: #854d0e;
+    --row-border: rgba(15, 23, 42, 0.06);
+    --shadow: 0 1px 2px rgba(15,23,42,0.04), 0 10px 24px -12px rgba(15,23,42,0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0c14;
+      --bg-accent: radial-gradient(circle at 15% -10%, rgba(99,102,241,0.18), transparent 45%);
+      --card-bg: #161826;
+      --card-border: rgba(255,255,255,0.06);
+      --text: #eef0fb;
+      --muted: #9aa0b4;
+      --field-bg: #1e2133;
+      --field-border: #2c3049;
+      --field-focus: #818cf8;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --accent-soft: rgba(99,102,241,0.16);
+      --accent-soft-text: #c7d2fe;
+      --danger: #f87171;
+      --danger-hover: #fca5a5;
+      --danger-soft: rgba(248,113,113,0.16);
+      --danger-soft-text: #fca5a5;
+      --success-soft: rgba(34,197,94,0.16);
+      --success-text: #86efac;
+      --warn-soft: rgba(250,204,21,0.14);
+      --warn-text: #fde68a;
+      --row-border: rgba(255,255,255,0.06);
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 10px 24px -12px rgba(0,0,0,0.5);
+    }
+  }
+  * { box-sizing: border-box; }
   body {
-    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
-    max-width: 1100px;
-    margin: 40px auto;
-    padding: 0 20px;
-    background: #f5f5f7;
-    color: #1a1a1a;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 36px 20px 60px;
+    background: var(--bg) var(--bg-accent);
+    background-attachment: fixed;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
   }
-  h1 { font-size: 20px; margin-bottom: 4px; }
-  h2 { font-size: 15px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
-  h2 .section-count { font-size: 12px; font-weight: 500; color: #888; }
-  p.sub { color: #666; font-size: 13px; margin-top: 0; }
-  p.section-sub { color: #888; font-size: 12px; margin: 0 0 10px; }
+  .page-head { margin-bottom: 24px; }
+  h1 { font-size: 22px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 {
+    font-size: 14.5px; font-weight: 700; margin: 0 0 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  h2 .emoji { font-size: 15px; line-height: 1; }
+  h2 .section-count { font-size: 12px; font-weight: 500; color: var(--muted); }
+  p.sub { color: var(--muted); font-size: 13.5px; line-height: 1.5; margin: 0; }
+  p.section-sub { color: var(--muted); font-size: 12px; margin: 0 0 12px; line-height: 1.5; }
   .card {
-    background: #fff;
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 16px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 22px;
+    margin-bottom: 18px;
+    box-shadow: var(--shadow);
   }
-  label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
   input {
     width: 100%;
     box-sizing: border-box;
-    padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
+    padding: 11px 12px;
+    border: 1px solid var(--field-border);
+    border-radius: 10px;
     font-size: 14px;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
+    background: var(--field-bg);
+    color: var(--text);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    font-family: inherit;
   }
+  input:focus {
+    outline: none;
+    border-color: var(--field-focus);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--field-focus) 22%, transparent);
+  }
+  input::placeholder { color: #9aa0b4; }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   button {
     padding: 10px 18px;
     border: none;
-    border-radius: 8px;
-    background: #4f46e5;
+    border-radius: 10px;
+    background: var(--accent);
     color: #fff;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
+    transition: background 0.15s ease, transform 0.05s ease;
   }
-  button:disabled { opacity: 0.5; cursor: default; }
-  .msg { font-size: 13px; margin-top: 10px; padding: 10px; border-radius: 8px; display: none; }
+  button:hover:not(:disabled) { background: var(--accent-hover); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  .msg { font-size: 13px; margin-top: 10px; padding: 11px 12px; border-radius: 10px; display: none; line-height: 1.4; }
   .msg.show { display: block; }
-  .msg.err { background: #fee2e2; color: #991b1b; }
-  .meta { font-size: 12px; color: #666; margin-bottom: 10px; }
+  .msg.err { background: var(--danger-soft); color: var(--danger-soft-text); }
+  .meta { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #eee; white-space: nowrap; }
-  th { color: #666; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.02em; }
-  td.mono { font-family: monospace; font-size: 12px; }
-  .table-wrap { overflow-x: auto; }
-  .empty-row td { color: #888; }
+  th, td { text-align: left; padding: 11px 10px; border-bottom: 1px solid var(--row-border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  tbody tr:hover { background: color-mix(in srgb, var(--accent-soft) 40%, transparent); }
+  td.mono { font-family: "SF Mono", Consolas, monospace; font-size: 12px; }
+  .table-wrap { overflow-x: auto; border-radius: 10px; }
+  .empty-row td { color: var(--muted); }
+  .empty-row:hover { background: transparent; }
 
   .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-  .pill.online { background: #dcfce7; color: #166534; }
-  .pill.offline { background: #f3f4f6; color: #555; }
-  .pill.used { background: #eef2ff; color: #3730a3; }
-  .pill.extended { background: #dbeafe; color: #1e40af; }
-  .pill.revoked { background: #fee2e2; color: #991b1b; }
-  .pill.unused { background: #fef9c3; color: #854d0e; }
-  .pill.nocode { background: #f3f4f6; color: #888; }
-  .owner-tag { font-size: 11px; color: #4f46e5; font-weight: 600; }
+  .pill.online { background: var(--success-soft); color: var(--success-text); }
+  .pill.offline { background: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--muted); }
+  .pill.used { background: var(--accent-soft); color: var(--accent-soft-text); }
+  .pill.extended { background: color-mix(in srgb, #3b82f6 18%, transparent); color: #1e40af; }
+  .pill.revoked { background: var(--danger-soft); color: var(--danger-soft-text); }
+  .pill.unused { background: var(--warn-soft); color: var(--warn-text); }
+  .pill.nocode { background: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--muted); }
+  .owner-tag { font-size: 11px; color: var(--accent); font-weight: 600; }
   .delete-btn {
     padding: 5px 12px;
     font-size: 12px;
     font-weight: 600;
-    background: #dc2626;
-    border-radius: 6px;
+    background: var(--danger);
+    border-radius: 8px;
   }
+  .delete-btn:hover:not(:disabled) { background: var(--danger-hover); }
   .delete-btn:disabled { opacity: 0.4; cursor: default; }
   .copy-btn {
     padding: 2px 8px;
     font-size: 11px;
     font-weight: 600;
-    background: #eef2ff;
-    color: #3730a3;
-    border-radius: 5px;
+    background: var(--accent-soft);
+    color: var(--accent-soft-text);
+    border-radius: 6px;
     margin-left: 6px;
   }
+  .copy-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-soft) 70%, var(--accent) 15%); }
   .copy-btn:disabled { opacity: 0.7; cursor: default; }
   .search-row { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 6px; }
   .search-row > div { flex: 1; }
   .search-row input { margin-bottom: 0; }
-  #refreshBtn { background: #eef2ff; color: #3730a3; white-space: nowrap; }
-  .refresh-status { font-size: 12px; color: #666; margin-bottom: 14px; }
+  #refreshBtn { background: var(--accent-soft); color: var(--accent-soft-text); white-space: nowrap; }
+  #refreshBtn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-soft) 70%, var(--accent) 15%); }
+  .refresh-status { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
 </style>
 </head>
 <body>
-  <h1>NexaPOS Device Dashboard</h1>
-  <p class="sub">Every registered device across every shop, joined with its license status - plus any generated codes that haven't been activated on a device yet. A device appears the instant it registers; a code appears the instant it's generated.</p>
+  <div class="page-head">
+    <h1>NexaPOS Device Dashboard</h1>
+    <p class="sub">Every registered device across every shop, joined with its license status - plus any generated codes that haven't been activated on a device yet. A device appears the instant it registers; a code appears the instant it's generated.</p>
+  </div>
 
   <div class="card">
     <div class="row">
@@ -131,7 +212,7 @@
        a separate fetch - see rebuildShopRows(). Revoke here disables
        every device the shop currently has, in one call. -->
   <div class="card">
-    <h2>Joined shops <span class="section-count" id="shopCount"></span></h2>
+    <h2><span class="emoji">🏬</span> Joined shops <span class="section-count" id="shopCount"></span></h2>
     <p class="section-sub">Every shop that has ever registered a device on nexapos_platform. Revoking a shop disables all of its devices at once - they immediately lose access and cannot authenticate again.</p>
     <div class="table-wrap">
       <table>
@@ -147,7 +228,7 @@
        (i.e. it was actually registered/activated at some point) AND its
        last_seen_at is recent - see isRealActiveDevice/isDeviceOnline. -->
   <div class="card">
-    <h2>Online devices <span class="section-count" id="onlineCount"></span></h2>
+    <h2><span class="emoji">🟢</span> Online devices <span class="section-count" id="onlineCount"></span></h2>
     <p class="section-sub">Checked in within the last 5 minutes. "Online for" is time since that last check-in, not a tracked session start - there's no continuous "online since" moment recorded server-side, only recency of the last authenticated call.</p>
     <div class="table-wrap">
       <table>
@@ -164,7 +245,7 @@
        Online - a device that was never activated/registered never
        appears here, it belongs in Unregistered instead. -->
   <div class="card">
-    <h2>Offline devices <span class="section-count" id="offlineCount"></span></h2>
+    <h2><span class="emoji">⚪</span> Offline devices <span class="section-count" id="offlineCount"></span></h2>
     <p class="section-sub">Previously activated and registered, but hasn't checked in within the last 5 minutes.</p>
     <div class="table-wrap">
       <table>
@@ -178,7 +259,7 @@
   </div>
 
   <div class="card">
-    <h2>Unregistered devices <span class="section-count" id="unregisteredCount"></span></h2>
+    <h2><span class="emoji">❔</span> Unregistered devices <span class="section-count" id="unregisteredCount"></span></h2>
     <p class="section-sub">No real device row on nexapos_platform yet - either a license code that's never been activated on any device, or a device_id that activated a license but never opened Device Sync to register.</p>
     <div class="table-wrap">
       <table>
@@ -192,7 +273,7 @@
   </div>
 
   <div class="card">
-    <h2>Removed devices <span class="section-count" id="disabledCount"></span></h2>
+    <h2><span class="emoji">🗑️</span> Removed devices <span class="section-count" id="disabledCount"></span></h2>
     <p class="section-sub">Deleted from this dashboard (or revoked elsewhere) - disabled permanently, kept here only for reference.</p>
     <div class="table-wrap">
       <table>

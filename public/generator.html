@@ -7,68 +7,145 @@
   integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk"
   crossorigin="anonymous"></script>
 <style>
-  :root { color-scheme: light dark; }
+  :root {
+    color-scheme: light dark;
+    --bg: #f2f3f8;
+    --bg-accent: radial-gradient(circle at 15% -10%, rgba(99,102,241,0.12), transparent 45%);
+    --card-bg: #ffffff;
+    --card-border: rgba(15, 23, 42, 0.06);
+    --text: #14162b;
+    --muted: #6b7280;
+    --field-bg: #ffffff;
+    --field-border: #dfe2ec;
+    --field-focus: #6366f1;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --accent-soft: #eef2ff;
+    --danger: #dc2626;
+    --danger-hover: #b91c1c;
+    --danger-soft: #fee2e2;
+    --success-soft: #dcfce7;
+    --success-text: #166534;
+    --err-soft: #fee2e2;
+    --err-text: #991b1b;
+    --shadow: 0 1px 2px rgba(15,23,42,0.04), 0 10px 24px -12px rgba(15,23,42,0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0c14;
+      --bg-accent: radial-gradient(circle at 15% -10%, rgba(99,102,241,0.18), transparent 45%);
+      --card-bg: #161826;
+      --card-border: rgba(255,255,255,0.06);
+      --text: #eef0fb;
+      --muted: #9aa0b4;
+      --field-bg: #1e2133;
+      --field-border: #2c3049;
+      --field-focus: #818cf8;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --accent-soft: rgba(99,102,241,0.16);
+      --danger: #f87171;
+      --danger-hover: #fca5a5;
+      --danger-soft: rgba(248,113,113,0.16);
+      --success-soft: rgba(34,197,94,0.16);
+      --success-text: #86efac;
+      --err-soft: rgba(248,113,113,0.16);
+      --err-text: #fca5a5;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 10px 24px -12px rgba(0,0,0,0.5);
+    }
+  }
+  * { box-sizing: border-box; }
   body {
-    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
-    max-width: 480px;
-    margin: 40px auto;
-    padding: 0 20px;
-    background: #f5f5f7;
-    color: #1a1a1a;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 36px 20px 60px;
+    background: var(--bg) var(--bg-accent);
+    background-attachment: fixed;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
   }
-  h1 { font-size: 20px; margin-bottom: 4px; }
-  p.sub { color: #666; font-size: 13px; margin-top: 0; }
+  .page-head { margin-bottom: 24px; }
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  p.sub { color: var(--muted); font-size: 13.5px; line-height: 1.5; margin: 0; }
   .card {
-    background: #fff;
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 16px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 22px;
+    margin-bottom: 18px;
+    box-shadow: var(--shadow);
   }
-  label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
-  select {
+  .card-title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 14.5px;
+    font-weight: 700;
+    margin: 0 0 14px;
+  }
+  .card-title .emoji { font-size: 16px; line-height: 1; }
+  .card-title .hint {
+    font-weight: 500;
+    color: var(--muted);
+    font-size: 12px;
+    margin-left: auto;
+    text-align: right;
+  }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+  select, input {
     width: 100%;
     box-sizing: border-box;
-    padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
+    padding: 11px 12px;
+    border: 1px solid var(--field-border);
+    border-radius: 10px;
     font-size: 14px;
-    margin-bottom: 12px;
-    background: #fff;
-    color: #1a1a1a;
+    margin-bottom: 14px;
+    background: var(--field-bg);
+    color: var(--text);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    font-family: inherit;
   }
-  input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    font-size: 14px;
-    margin-bottom: 12px;
+  select:focus, input:focus {
+    outline: none;
+    border-color: var(--field-focus);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--field-focus) 22%, transparent);
   }
+  input::placeholder { color: #9aa0b4; }
   input:read-only {
-    background: #f0f0f3;
-    color: #555;
+    background: color-mix(in srgb, var(--field-bg) 60%, var(--muted) 10%);
+    color: var(--muted);
   }
   button {
     width: 100%;
     padding: 12px;
     border: none;
-    border-radius: 8px;
-    background: #4f46e5;
+    border-radius: 10px;
+    background: var(--accent);
     color: #fff;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
+    transition: background 0.15s ease, transform 0.05s ease;
   }
-  button:disabled { opacity: 0.5; cursor: default; }
-  button.danger { background: #dc2626; }
+  button:hover:not(:disabled) { background: var(--accent-hover); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.danger { background: var(--danger); }
+  button.danger:hover:not(:disabled) { background: var(--danger-hover); }
+  button.secondary { background: var(--accent-soft); color: var(--accent); }
+  button.secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-soft) 70%, var(--accent) 15%); }
   .result {
     text-align: center;
-    padding: 16px;
-    margin-top: 12px;
-    border-radius: 8px;
-    background: #eef2ff;
+    padding: 18px;
+    margin-top: 14px;
+    border-radius: 12px;
+    background: var(--accent-soft);
     display: none;
   }
   .result.show { display: block; }
@@ -76,18 +153,22 @@
     font-size: 28px;
     font-weight: 700;
     letter-spacing: 2px;
-    font-family: monospace;
+    font-family: "SF Mono", Consolas, monospace;
+    color: var(--accent);
   }
-  .timer { font-size: 13px; color: #666; margin-top: 4px; }
-  .msg { font-size: 13px; margin-top: 10px; padding: 10px; border-radius: 8px; display: none; }
+  .timer { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .msg { font-size: 13px; margin-top: 10px; padding: 11px 12px; border-radius: 10px; display: none; line-height: 1.4; }
   .msg.show { display: block; }
-  .msg.ok { background: #dcfce7; color: #166534; }
-  .msg.err { background: #fee2e2; color: #991b1b; }
+  .msg.ok { background: var(--success-soft); color: var(--success-text); }
+  .msg.err { background: var(--err-soft); color: var(--err-text); }
+  .divider-space { height: 10px; }
 </style>
 </head>
 <body>
-  <h1>NexaPOS Key Generator</h1>
-  <p class="sub">Run this after a customer pays. The code is redeemable for a limited window and locks to whichever device activates it first.</p>
+  <div class="page-head">
+    <h1>NexaPOS Key Generator</h1>
+    <p class="sub">Run this after a customer pays. The code is redeemable for a limited window and locks to whichever device activates it first.</p>
+  </div>
 
   <div class="card">
     <label for="serverUrl">License server address</label>
@@ -116,6 +197,7 @@
       <option value="custom">Custom...</option>
     </select>
     <input id="durationCustom" type="number" min="1" placeholder="Days" style="display:none">
+    <div class="card-title" style="margin:0 0 10px"><span class="emoji">🔑</span> Generate a license key</div>
     <button id="generateBtn" onclick="generateKey()">Generate key</button>
     <div class="result" id="result">
       <div class="code" id="codeText"></div>
@@ -126,14 +208,16 @@
   </div>
 
   <div class="card">
-    <label for="revokeCode">Revoke a key (e.g. after a refund)</label>
+    <div class="card-title"><span class="emoji">🚫</span> Revoke a key</div>
+    <label for="revokeCode">Code to revoke (e.g. after a refund)</label>
     <input id="revokeCode" placeholder="the code to revoke">
     <button class="danger" onclick="revokeKey()">Revoke</button>
     <div class="msg" id="revokeMsg"></div>
   </div>
 
   <div class="card">
-    <label for="extendCode">Extend a license (renewal payment on an already-activated key)</label>
+    <div class="card-title"><span class="emoji">⏳</span> Extend a license</div>
+    <label for="extendCode">Activated code (renewal payment on an already-activated key)</label>
     <input id="extendCode" placeholder="the activated code to extend">
     <label for="extendDays">Days to add</label>
     <input id="extendDays" type="number" min="1" placeholder="e.g. 30">
@@ -142,30 +226,32 @@
   </div>
 
   <div class="card">
-    <label for="publishVersion">Publish app update - run once per real release, after the new versioned files are pushed to the download site</label>
+    <div class="card-title"><span class="emoji">🚀</span> Publish app update <span class="hint">run once per real release</span></div>
+    <label for="publishVersion">Version</label>
     <input id="publishVersion" placeholder="Loading current version..." readonly>
     <label for="publishNotes">Release notes (short summary shown to users)</label>
     <input id="publishNotes" placeholder="e.g. Safer shop switching, POS migration, and cashier updates">
     <label for="publishWindowsInstallerUrl">Windows setup EXE URL</label>
     <input id="publishWindowsInstallerUrl" onchange="hashPublishFile('windowsInstaller')">
     <label for="publishWindowsInstallerSha256">Windows setup EXE SHA-256 (computed from the file above)</label>
-    <input id="publishWindowsInstallerSha256" placeholder="Click \"Fetch & verify files\" below" readonly>
+    <input id="publishWindowsInstallerSha256" placeholder="Click &quot;Fetch &amp; verify files&quot; below" readonly>
     <label for="publishAndroidUrl">Android download URL</label>
     <input id="publishAndroidUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-1.0.12.apk" onchange="hashPublishFile('android')">
     <label for="publishAndroidSha256">Android file SHA-256 (computed from the file actually at the URL above)</label>
     <input id="publishAndroidSha256" placeholder="Click &quot;Fetch &amp; verify files&quot; below" readonly>
-    <button onclick="hashBothPublishFiles()" id="hashFilesBtn">Fetch &amp; verify files</button>
+    <button class="secondary" onclick="hashBothPublishFiles()" id="hashFilesBtn">Fetch &amp; verify files</button>
     <div class="msg" id="hashMsg"></div>
-    <div style="height:10px"></div>
+    <div class="divider-space"></div>
     <button onclick="publishVersion()" id="publishBtn" disabled>Publish update</button>
     <div class="msg" id="publishMsg"></div>
   </div>
 
   <div class="card">
-    <label for="recoveryDevice">Support recovery - device ID</label>
+    <div class="card-title"><span class="emoji">🛠️</span> Support recovery</div>
+    <label for="recoveryDevice">Device ID</label>
     <input id="recoveryDevice" placeholder="Device ID from the client's login or authenticator screen">
     <button onclick="supportRecovery('reset_authenticator')">Reset authenticator</button>
-    <button onclick="supportRecovery('issue_support_access')" style="margin-top:10px">Generate super admin recovery password</button>
+    <button class="secondary" onclick="supportRecovery('issue_support_access')" style="margin-top:10px">Generate super admin recovery password</button>
     <div class="msg" id="recoveryMsg"></div>
     <input id="recoveryPassword" readonly aria-label="One-time support password" hidden>
   </div>
