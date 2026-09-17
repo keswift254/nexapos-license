@@ -475,7 +475,18 @@ async function hashPublishFile(platform) {
     if (progressEl) progressEl.textContent = 'Verified ✓';
     return hash;
   } catch (e) {
-    shaField.placeholder = 'Could not fetch/hash this file: ' + e;
+    // GitHub Release assets redirect to release-assets.githubusercontent.com
+    // (Azure Blob Storage), which sends no Access-Control-Allow-Origin at
+    // all - the browser blocks the cross-origin fetch itself before this
+    // page ever sees a real response, always surfacing as this same
+    // generic TypeError regardless of the file or connection. There's no
+    // client-side fix for that; paste the hash in directly instead (from
+    // `sha256sum` / `Get-FileHash` on the file you built, or a fetch/hash
+    // done against a CORS-friendly host like GitHub Pages).
+    const looksLikeCors = url.includes('github.com/') && url.includes('/releases/download/');
+    shaField.placeholder = looksLikeCors
+      ? 'GitHub Releases blocks this kind of check (no CORS header) - paste the SHA-256 in manually instead.'
+      : 'Could not fetch/hash this file: ' + e;
     if (progressEl) progressEl.textContent = '';
     updatePublishButtonState();
     return null;
@@ -515,7 +526,7 @@ async function hashBothPublishFiles() {
     const windowsInstallerSha = await hashPublishFile('windowsInstaller');
     const androidSha = await hashPublishFile('android');
     if (!windowsInstallerSha || !androidSha) {
-      showMsg('hashMsg', 'Could not fetch/hash one or more files - check that the setup EXE and APK have been uploaded first.', false);
+      showMsg('hashMsg', 'Could not fetch/hash one or more files - check the field(s) above for details (GitHub Releases URLs need the SHA-256 pasted in manually; see the placeholder text).', false);
       return;
     }
     const staleWindowsInstaller = publishedShas.windowsInstaller && windowsInstallerSha === publishedShas.windowsInstaller;
