@@ -330,19 +330,23 @@ function incrementPatch(version) {
 // the same bits every time and devices never actually moved version.
 let publishedShas = { windowsInstaller: null, android: null };
 
-// GitHub Releases, not the old github.io/downloads/ path - Pages serves
-// straight out of git storage, which measured at ~20-28 KB/s for a
-// multi-ten-megabyte file (git itself warns about committing anything
-// over 50MB for exactly this reason). Releases uses GitHub's real
-// binary-asset storage/CDN and measured ~200 KB/s for the same file, so
-// every future release's setup EXE/APK should be attached to a GitHub
-// Release tagged v<version> on nexapos-site instead of committed under
-// downloads/ - see `gh release create v<version> <files> --repo
-// keswift254/nexapos-site`.
+// github.io/downloads/, not GitHub Releases - Releases was tried for
+// real (1.0.34) on the theory that Pages' git-backed storage was the
+// slow part, and it made things worse, not better: the installed app's
+// own updater (a native HTTP client, not a browser - CORS never
+// applied to it) downloaded the Releases-hosted installer far slower
+// than every previous Pages-hosted update, confirmed by the person
+// actually watching it happen. Releases also broke this page's own
+// "Fetch & verify files" outright (release-assets.githubusercontent.com,
+// the Azure Blob host Release downloads redirect to, sends no
+// Access-Control-Allow-Origin at all). Whatever's actually slow about
+// Pages for a multi-ten-megabyte file, Releases isn't the fix - keep
+// committing setup EXEs/APKs under publish-site/downloads/.
 function setSuggestedDownloadUrls(version) {
-  const base = `https://github.com/keswift254/nexapos-site/releases/download/v${version}`;
-  document.getElementById('publishWindowsInstallerUrl').value = `${base}/NexaPOS-Setup-${version}.exe`;
-  document.getElementById('publishAndroidUrl').value = `${base}/NexaPOS-${version}.apk`;
+  document.getElementById('publishWindowsInstallerUrl').value =
+    `https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Setup-${version}.exe`;
+  document.getElementById('publishAndroidUrl').value =
+    `https://keswift254.github.io/nexapos-site/downloads/NexaPOS-${version}.apk`;
 }
 
 async function loadSuggestedVersion() {
