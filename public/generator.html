@@ -57,7 +57,7 @@
   * { box-sizing: border-box; }
   body {
     font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-    max-width: 520px;
+    max-width: 680px;
     margin: 0 auto;
     padding: 36px 20px 60px;
     background: var(--bg) var(--bg-accent);
@@ -162,6 +162,9 @@
   .msg.ok { background: var(--success-soft); color: var(--success-text); }
   .msg.err { background: var(--err-soft); color: var(--err-text); }
   .divider-space { height: 10px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
+  .progress-text { font-size: 12px; color: var(--muted); margin: -8px 0 14px; min-height: 15px; }
 </style>
 </head>
 <body>
@@ -227,18 +230,32 @@
 
   <div class="card">
     <div class="card-title"><span class="emoji">🚀</span> Publish app update <span class="hint">run once per real release</span></div>
-    <label for="publishVersion">Version</label>
-    <input id="publishVersion" placeholder="Loading current version..." readonly>
-    <label for="publishNotes">Release notes (short summary shown to users)</label>
-    <input id="publishNotes" placeholder="e.g. Safer shop switching, POS migration, and cashier updates">
-    <label for="publishWindowsInstallerUrl">Windows setup EXE URL</label>
-    <input id="publishWindowsInstallerUrl" onchange="hashPublishFile('windowsInstaller')">
-    <label for="publishWindowsInstallerSha256">Windows setup EXE SHA-256 (computed from the file above)</label>
-    <input id="publishWindowsInstallerSha256" placeholder="Click &quot;Fetch &amp; verify files&quot; below" readonly>
-    <label for="publishAndroidUrl">Android download URL</label>
-    <input id="publishAndroidUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-1.0.12.apk" onchange="hashPublishFile('android')">
-    <label for="publishAndroidSha256">Android file SHA-256 (computed from the file actually at the URL above)</label>
-    <input id="publishAndroidSha256" placeholder="Click &quot;Fetch &amp; verify files&quot; below" readonly>
+    <div class="grid-2">
+      <div>
+        <label for="publishVersion">Version</label>
+        <input id="publishVersion" placeholder="Loading current version..." readonly>
+      </div>
+      <div>
+        <label for="publishNotes">Release notes (short summary shown to users)</label>
+        <input id="publishNotes" placeholder="e.g. Safer shop switching, POS migration, and cashier updates">
+      </div>
+    </div>
+    <div class="grid-2">
+      <div>
+        <label for="publishWindowsInstallerUrl">Windows setup EXE URL</label>
+        <input id="publishWindowsInstallerUrl" onchange="hashPublishFile('windowsInstaller')">
+        <label for="publishWindowsInstallerSha256">SHA-256 (computed from the file above)</label>
+        <input id="publishWindowsInstallerSha256" placeholder="Click &quot;Fetch &amp; verify files&quot; below" readonly>
+        <div class="progress-text" id="publishWindowsInstallerProgress"></div>
+      </div>
+      <div>
+        <label for="publishAndroidUrl">Android download URL</label>
+        <input id="publishAndroidUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-1.0.12.apk" onchange="hashPublishFile('android')">
+        <label for="publishAndroidSha256">SHA-256 (computed from the file at the URL above)</label>
+        <input id="publishAndroidSha256" placeholder="Click &quot;Fetch &amp; verify files&quot; below" readonly>
+        <div class="progress-text" id="publishAndroidProgress"></div>
+      </div>
+    </div>
     <button class="secondary" onclick="hashBothPublishFiles()" id="hashFilesBtn">Fetch &amp; verify files</button>
     <div class="msg" id="hashMsg"></div>
     <div class="divider-space"></div>
@@ -338,7 +355,10 @@ async function loadSuggestedVersion() {
   }
 }
 
-async function sha256OfUrl(url) {
+// onProgress(receivedBytes, totalBytes|0, phase) where phase is
+// 'downloading' or 'hashing' - lets the caller show real numbers instead
+// of a placeholder that can't be told apart from being stuck.
+async function sha256OfUrl(url, onProgress) {
   // A multi-ten-megabyte download over a flaky connection can drop with
   // a generic "Failed to fetch" that a plain retry clears right up -
   // seen in practice on the ~75MB Android APK specifically, never the
@@ -349,7 +369,28 @@ async function sha256OfUrl(url) {
     try {
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const buffer = await res.arrayBuffer();
+      const total = Number(res.headers.get('Content-Length')) || 0;
+      // Streamed via the reader (rather than a single res.arrayBuffer())
+      // purely so onProgress has something to report as bytes actually
+      // arrive - digesting still needs the whole thing assembled first,
+      // since SubtleCrypto has no incremental/streaming digest API.
+      const reader = res.body.getReader();
+      const chunks = [];
+      let received = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (onProgress) onProgress(received, total, 'downloading');
+      }
+      const buffer = new Uint8Array(received);
+      let offset = 0;
+      for (const chunk of chunks) {
+        buffer.set(chunk, offset);
+        offset += chunk.length;
+      }
+      if (onProgress) onProgress(received, total, 'hashing');
       const digest = await crypto.subtle.digest('SHA-256', buffer);
       return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
     } catch (e) {
@@ -357,6 +398,10 @@ async function sha256OfUrl(url) {
     }
   }
   throw lastError;
+}
+
+function formatMB(bytes) {
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
 // Fetches the real file currently sitting at the Windows/Android URL
@@ -369,23 +414,37 @@ async function sha256OfUrl(url) {
 // until every platform's file has genuinely changed.
 async function hashPublishFile(platform) {
   const fieldIds = {
-    windowsInstaller: ['publishWindowsInstallerUrl', 'publishWindowsInstallerSha256'],
-    android: ['publishAndroidUrl', 'publishAndroidSha256'],
+    windowsInstaller: ['publishWindowsInstallerUrl', 'publishWindowsInstallerSha256', 'publishWindowsInstallerProgress'],
+    android: ['publishAndroidUrl', 'publishAndroidSha256', 'publishAndroidProgress'],
   };
-  const [urlId, shaId] = fieldIds[platform];
+  const [urlId, shaId, progressId] = fieldIds[platform];
   const urlField = document.getElementById(urlId);
   const shaField = document.getElementById(shaId);
+  const progressEl = document.getElementById(progressId);
   const url = urlField.value.trim();
   if (!url) return null;
   shaField.value = '';
   shaField.placeholder = 'Fetching and hashing...';
+  if (progressEl) progressEl.textContent = 'Starting…';
   try {
-    const hash = await sha256OfUrl(url);
+    const hash = await sha256OfUrl(url, (received, total, phase) => {
+      if (!progressEl) return;
+      if (phase === 'hashing') {
+        progressEl.textContent = 'Verifying checksum…';
+      } else if (total) {
+        const pct = Math.round((received / total) * 100);
+        progressEl.textContent = `Downloading… ${formatMB(received)} / ${formatMB(total)} (${pct}%)`;
+      } else {
+        progressEl.textContent = `Downloading… ${formatMB(received)}`;
+      }
+    });
     shaField.value = hash;
     shaField.placeholder = '';
+    if (progressEl) progressEl.textContent = 'Verified ✓';
     return hash;
   } catch (e) {
     shaField.placeholder = 'Could not fetch/hash this file: ' + e;
+    if (progressEl) progressEl.textContent = '';
     return null;
   }
 }
