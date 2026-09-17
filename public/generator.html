@@ -146,11 +146,7 @@
     <input id="publishVersion" placeholder="Loading current version..." readonly>
     <label for="publishNotes">Release notes (short summary shown to users)</label>
     <input id="publishNotes" placeholder="e.g. Safer shop switching, POS migration, and cashier updates">
-    <label for="publishWindowsUrl">Windows legacy ZIP URL (kept for older clients)</label>
-    <input id="publishWindowsUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Windows-1.0.12.zip" onchange="hashPublishFile('windows')">
-    <label for="publishWindowsSha256">Windows ZIP SHA-256 (computed from the file actually at the URL above)</label>
-    <input id="publishWindowsSha256" placeholder="Click \"Fetch & verify files\" below" readonly>
-    <label for="publishWindowsInstallerUrl">Windows setup EXE URL (used by installer-aware clients)</label>
+    <label for="publishWindowsInstallerUrl">Windows setup EXE URL</label>
     <input id="publishWindowsInstallerUrl" onchange="hashPublishFile('windowsInstaller')">
     <label for="publishWindowsInstallerSha256">Windows setup EXE SHA-256 (computed from the file above)</label>
     <input id="publishWindowsInstallerSha256" placeholder="Click \"Fetch & verify files\" below" readonly>
@@ -229,11 +225,9 @@ function incrementPatch(version) {
 // happened twice for real (1.0.2 and again at 1.0.4/1.0.5) before this
 // existed: the URLs never changed, so the "update" silently reinstalled
 // the same bits every time and devices never actually moved version.
-let publishedShas = { windows: null, windowsInstaller: null, android: null };
+let publishedShas = { windowsInstaller: null, android: null };
 
 function setSuggestedDownloadUrls(version) {
-  document.getElementById('publishWindowsUrl').value =
-    `https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Windows-${version}.zip`;
   document.getElementById('publishWindowsInstallerUrl').value =
     `https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Setup-${version}.exe`;
   document.getElementById('publishAndroidUrl').value =
@@ -249,7 +243,6 @@ async function loadSuggestedVersion() {
     setSuggestedDownloadUrls(field.value);
     if (data.success) {
       publishedShas = {
-        windows: data.windows_sha256 || null,
         windowsInstaller: data.windows_installer_sha256 || null,
         android: data.android_sha256 || null,
       };
@@ -277,7 +270,6 @@ async function sha256OfUrl(url) {
 // until every platform's file has genuinely changed.
 async function hashPublishFile(platform) {
   const fieldIds = {
-    windows: ['publishWindowsUrl', 'publishWindowsSha256'],
     windowsInstaller: ['publishWindowsInstallerUrl', 'publishWindowsInstallerSha256'],
     android: ['publishAndroidUrl', 'publishAndroidSha256'],
   };
@@ -306,29 +298,27 @@ async function hashBothPublishFiles() {
   publishBtn.disabled = true;
   document.getElementById('hashMsg').className = 'msg';
   try {
-    const [windowsSha, windowsInstallerSha, androidSha] = await Promise.all([
-      hashPublishFile('windows'),
+    const [windowsInstallerSha, androidSha] = await Promise.all([
       hashPublishFile('windowsInstaller'),
       hashPublishFile('android'),
     ]);
-    if (!windowsSha || !windowsInstallerSha || !androidSha) {
-      showMsg('hashMsg', 'Could not fetch/hash one or more files - check that the ZIP, setup EXE, and APK have been uploaded first.', false);
+    if (!windowsInstallerSha || !androidSha) {
+      showMsg('hashMsg', 'Could not fetch/hash one or more files - check that the setup EXE and APK have been uploaded first.', false);
       return;
     }
-    const staleWindows = publishedShas.windows && windowsSha === publishedShas.windows;
     const staleWindowsInstaller = publishedShas.windowsInstaller && windowsInstallerSha === publishedShas.windowsInstaller;
     const staleAndroid = publishedShas.android && androidSha === publishedShas.android;
-    if (staleWindows || staleWindowsInstaller || staleAndroid) {
-      const which = [staleWindows && 'Windows ZIP', staleWindowsInstaller && 'Windows setup EXE', staleAndroid && 'Android'].filter(Boolean).join(', ');
+    if (staleWindowsInstaller || staleAndroid) {
+      const which = [staleWindowsInstaller && 'Windows setup EXE', staleAndroid && 'Android'].filter(Boolean).join(', ');
       showMsg(
         'hashMsg',
-        `${which} file${[staleWindows, staleWindowsInstaller, staleAndroid].filter(Boolean).length > 1 ? 's are' : ' is'} identical to what's already published - `
+        `${which} file${[staleWindowsInstaller, staleAndroid].filter(Boolean).length > 1 ? 's are' : ' is'} identical to what's already published - `
           + `looks like the new build wasn't actually pushed to the download site yet. Rebuild and push first, then try again.`,
         false,
       );
       return;
     }
-    showMsg('hashMsg', 'ZIP, setup EXE, and APK verified and are genuinely different from the currently-published version.', true);
+    showMsg('hashMsg', 'Setup EXE and APK verified and are genuinely different from the currently-published version.', true);
     publishBtn.disabled = false;
   } finally {
     btn.disabled = false;
@@ -530,19 +520,17 @@ async function extendLicense() {
 
 async function publishVersion() {
   const version = document.getElementById('publishVersion').value.trim();
-  const windowsUrl = document.getElementById('publishWindowsUrl').value.trim();
   const windowsInstallerUrl = document.getElementById('publishWindowsInstallerUrl').value.trim();
   const androidUrl = document.getElementById('publishAndroidUrl').value.trim();
-  const windowsSha256 = document.getElementById('publishWindowsSha256').value.trim();
   const windowsInstallerSha256 = document.getElementById('publishWindowsInstallerSha256').value.trim();
   const androidSha256 = document.getElementById('publishAndroidSha256').value.trim();
   const releaseNotes = document.getElementById('publishNotes').value.trim();
   document.getElementById('publishMsg').className = 'msg';
-  if (!version || !windowsUrl || !windowsInstallerUrl || !androidUrl) {
-    showMsg('publishMsg', 'Version, Windows ZIP URL, Windows setup EXE URL, and Android URL are all required.', false);
+  if (!version || !windowsInstallerUrl || !androidUrl) {
+    showMsg('publishMsg', 'Version, Windows setup EXE URL, and Android URL are all required.', false);
     return;
   }
-  if (!windowsSha256 || !windowsInstallerSha256 || !androidSha256) {
+  if (!windowsInstallerSha256 || !androidSha256) {
     // Shouldn't be reachable - the button is disabled until
     // hashBothPublishFiles() succeeds - but this is the one action in
     // the whole page that actually ships an update to every installed
@@ -557,10 +545,8 @@ async function publishVersion() {
       headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         version,
-        windows_url: windowsUrl,
         windows_installer_url: windowsInstallerUrl,
         android_url: androidUrl,
-        windows_sha256: windowsSha256,
         windows_installer_sha256: windowsInstallerSha256,
         android_sha256: androidSha256,
         release_notes: releaseNotes,
@@ -574,7 +560,7 @@ async function publishVersion() {
       // verified fresh - prevents an accidental double-click (or a
       // second "publish" for a version that hasn't actually changed
       // again) from sailing through on stale button-enabled state.
-      publishedShas = { windows: windowsSha256, windowsInstaller: windowsInstallerSha256, android: androidSha256 };
+      publishedShas = { windowsInstaller: windowsInstallerSha256, android: androidSha256 };
       document.getElementById('publishBtn').disabled = true;
     } else {
       showMsg('publishMsg', data.message || 'Could not publish the update.', false);

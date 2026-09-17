@@ -688,37 +688,33 @@ if ($action === 'latest_version' && $method === 'GET') {
 /**
  * Admin action - run once per real release, from generator.html's
  * "Publish app update" section, right after the new build's
- * NexaPOS.apk/NexaPOS-Windows.zip are pushed to the download site.
+ * NexaPOS.apk/NexaPOS-Setup.exe are pushed to the download site.
  */
 if ($action === 'set_latest_version' && $method === 'POST') {
     requireAdmin($licenseConfig);
     $body = requestBody();
     $version = trim((string) ($body['version'] ?? ''));
-    $windowsUrl = trim((string) ($body['windows_url'] ?? ''));
+    // windows_url/windows_sha256 (the legacy pre-installer ZIP bridge)
+    // are no longer collected from generator.html - every real Windows
+    // install in the field is installer-aware by now, so the ZIP path
+    // is retired. windows_url stays '' going forward; the column itself
+    // is left in place (NOT NULL) rather than migrated, since old rows
+    // still legitimately have real values in it.
+    $windowsUrl = '';
     $windowsInstallerUrl = trim((string) ($body['windows_installer_url'] ?? ''));
     $androidUrl = trim((string) ($body['android_url'] ?? ''));
     $releaseNotes = trim((string) ($body['release_notes'] ?? ''));
-    $windowsSha256 = strtolower(trim((string) ($body['windows_sha256'] ?? '')));
+    $windowsSha256 = null;
     $windowsInstallerSha256 = strtolower(trim((string) ($body['windows_installer_sha256'] ?? '')));
     $androidSha256 = strtolower(trim((string) ($body['android_sha256'] ?? '')));
-    if ($version === '' || $windowsUrl === '' || $androidUrl === '') {
-        jsonResponse(['success' => false, 'message' => 'version, windows_url, and android_url are required.'], 422);
+    if ($version === '' || $windowsInstallerUrl === '' || $androidUrl === '') {
+        jsonResponse(['success' => false, 'message' => 'version, windows_installer_url, and android_url are required.'], 422);
     }
-    // Optional, but if given must actually be a SHA-256 (64 hex chars) -
-    // catches a truncated paste or the wrong value pasted in, rather
-    // than silently storing something that could never match a real
-    // file's hash and would brick every install for this version.
-    if ($windowsSha256 !== '' && !preg_match('/^[0-9a-f]{64}$/', $windowsSha256)) {
-        jsonResponse(['success' => false, 'message' => 'windows_sha256 must be a 64-character hex SHA-256, or left blank.'], 422);
+    if (!preg_match('/^https:\/\//i', $windowsInstallerUrl)) {
+        jsonResponse(['success' => false, 'message' => 'windows_installer_url must use HTTPS.'], 422);
     }
-    if ($windowsInstallerUrl !== '' && !preg_match('/^https:\/\//i', $windowsInstallerUrl)) {
-        jsonResponse(['success' => false, 'message' => 'windows_installer_url must use HTTPS, or be left blank for a ZIP-only bridge release.'], 422);
-    }
-    if ($windowsInstallerSha256 !== '' && !preg_match('/^[0-9a-f]{64}$/', $windowsInstallerSha256)) {
-        jsonResponse(['success' => false, 'message' => 'windows_installer_sha256 must be a 64-character hex SHA-256, or left blank.'], 422);
-    }
-    if ($windowsInstallerUrl !== '' && $windowsInstallerSha256 === '') {
-        jsonResponse(['success' => false, 'message' => 'windows_installer_sha256 is required when windows_installer_url is supplied.'], 422);
+    if (!preg_match('/^[0-9a-f]{64}$/', $windowsInstallerSha256)) {
+        jsonResponse(['success' => false, 'message' => 'windows_installer_sha256 must be a 64-character hex SHA-256.'], 422);
     }
     if ($androidSha256 !== '' && !preg_match('/^[0-9a-f]{64}$/', $androidSha256)) {
         jsonResponse(['success' => false, 'message' => 'android_sha256 must be a 64-character hex SHA-256, or left blank.'], 422);
@@ -735,33 +731,21 @@ if ($action === 'set_latest_version' && $method === 'POST') {
         $upsert->execute([
             $version,
             $windowsUrl,
-            $windowsInstallerUrl !== '' ? $windowsInstallerUrl : null,
+            $windowsInstallerUrl,
             $androidUrl,
-            $windowsSha256 !== '' ? $windowsSha256 : null,
-            $windowsInstallerSha256 !== '' ? $windowsInstallerSha256 : null,
+            $windowsSha256,
+            $windowsInstallerSha256,
             $androidSha256 !== '' ? $androidSha256 : null,
             $releaseNotes !== '' ? $releaseNotes : null,
         ]);
     } catch (\PDOException $e) {
         if (($e->errorInfo[1] ?? null) !== 1054) throw $e;
-        if ($windowsInstallerUrl !== '' || $windowsInstallerSha256 !== '') {
-            jsonResponse(['success' => false, 'message' => 'The database needs the Windows installer migration before this release can be published. Apply sql/migrations/20260906_002_app_version_installer.sql, then try again.'], 503);
-        }
-        $upsert = $pdo->prepare('
-            INSERT INTO app_version (id, version, windows_url, android_url, windows_sha256, android_sha256, release_notes)
-            VALUES (1, ?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE version = VALUES(version), windows_url = VALUES(windows_url),
-                android_url = VALUES(android_url), windows_sha256 = VALUES(windows_sha256),
-                android_sha256 = VALUES(android_sha256), release_notes = VALUES(release_notes)
-        ');
-        $upsert->execute([
-            $version,
-            $windowsUrl,
-            $androidUrl,
-            $windowsSha256 !== '' ? $windowsSha256 : null,
-            $androidSha256 !== '' ? $androidSha256 : null,
-            $releaseNotes !== '' ? $releaseNotes : null,
-        ]);
+        // The installer columns are now always populated (required
+        // above, since the ZIP path is retired) - unlike before, there's
+        // no reduced-column fallback insert left that could ever
+        // succeed without them, so a pre-migration database is a hard
+        // stop here rather than a silently degraded publish.
+        jsonResponse(['success' => false, 'message' => 'The database needs the Windows installer migration before this release can be published. Apply sql/migrations/20260906_002_app_version_installer.sql, then try again.'], 503);
     }
     jsonResponse(['success' => true]);
 }

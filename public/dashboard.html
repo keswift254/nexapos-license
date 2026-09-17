@@ -126,6 +126,23 @@
     <div class="refresh-status" id="refreshStatus"></div>
   </div>
 
+  <!-- Joined shops: one row per shop_id seen across deviceRows, grouping
+       the same data the device sections below already show rather than
+       a separate fetch - see rebuildShopRows(). Revoke here disables
+       every device the shop currently has, in one call. -->
+  <div class="card">
+    <h2>Joined shops <span class="section-count" id="shopCount"></span></h2>
+    <p class="section-sub">Every shop that has ever registered a device on nexapos_platform. Revoking a shop disables all of its devices at once - they immediately lose access and cannot authenticate again.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Shop</th><th>Devices</th><th>Joined</th><th>Status</th><th></th>
+        </tr></thead>
+        <tbody id="shopRows"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- Online: a device only ever lands here if it has a real clients row
        (i.e. it was actually registered/activated at some point) AND its
        last_seen_at is recent - see isRealActiveDevice/isDeviceOnline. -->
@@ -458,9 +475,65 @@ function renderEmptyRow(tbodyId, colspan, message) {
     `<tr class="empty-row"><td colspan="${colspan}">${message}</td></tr>`;
 }
 
+// Groups the (already search-filtered) rows that have a real shop_id -
+// unregistered/orphan placeholder rows carry no shop at all, so they're
+// excluded rather than lumped into some fake "Shop #undefined" group.
+// A shop counts as revoked once every device it has is disabled; a
+// shop with zero devices left (all deleted/never registered under it)
+// shows as revoked too, since there's nothing left able to authenticate.
+function groupByShop(visible) {
+  const shops = new Map();
+  for (const { device } of visible) {
+    if (!device || isNeverRegistered(device) || device.shop_id == null) continue;
+    const key = device.shop_id;
+    if (!shops.has(key)) {
+      shops.set(key, { shopId: key, businessName: device.business_name, devices: [] });
+    }
+    shops.get(key).devices.push(device);
+  }
+  return [...shops.values()].map((shop) => {
+    const activeCount = shop.devices.filter((d) => !isDisabledDevice(d)).length;
+    const joinedAtMs = Math.min(...shop.devices.map((d) => parseServerDate(d.created_at) ?? Infinity));
+    return {
+      ...shop,
+      totalCount: shop.devices.length,
+      activeCount,
+      revoked: activeCount === 0,
+      joinedAtMs: Number.isFinite(joinedAtMs) ? joinedAtMs : null,
+    };
+  }).sort((a, b) => (b.joinedAtMs ?? 0) - (a.joinedAtMs ?? 0));
+}
+
+function renderShopRows(visible) {
+  const shops = groupByShop(visible);
+  document.getElementById('shopCount').textContent = `(${shops.length})`;
+  if (shops.length === 0) {
+    renderEmptyRow('shopRows', 5, 'No joined shops yet.');
+    return;
+  }
+  document.getElementById('shopRows').innerHTML = shops.map((shop) => {
+    const joined = shop.joinedAtMs ? new Date(shop.joinedAtMs).toLocaleDateString() : 'Unknown';
+    const statusCell = shop.revoked
+      ? '<span class="pill revoked">Revoked</span>'
+      : '<span class="pill online">Active</span>';
+    const revokeBtn = shop.revoked
+      ? ''
+      : `<button class="delete-btn" onclick="revokeShop(${shop.shopId}, '${escapeHtml(shop.businessName || ('Shop #' + shop.shopId)).replace(/'/g, "\\'")}')">Revoke</button>`;
+    return `<tr>
+      <td>${escapeHtml(shop.businessName || ('Shop #' + shop.shopId))}</td>
+      <td>${shop.activeCount} / ${shop.totalCount}</td>
+      <td>${joined}</td>
+      <td>${statusCell}</td>
+      <td>${revokeBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
 function renderRows() {
   const query = document.getElementById('search').value.trim().toLowerCase();
   const visible = deviceRows.filter(({ device, license }) => matchesSearch(device, license, query));
+
+  renderShopRows(visible);
 
   const online = visible.filter(({ device }) => isDeviceOnline(device));
   const offline = visible.filter(({ device }) => isRealActiveDevice(device) && !isDeviceOnline(device));
@@ -585,6 +658,36 @@ async function deleteDevice(clientId, label) {
     }
     const row = deviceRows.find(({ device }) => device.id === clientId);
     if (row) row.device.status = 'disabled';
+    renderRows();
+  } catch (e) {
+    alert('Could not reach the server: ' + e);
+  }
+}
+
+// Shop-wide version of deleteDevice: disables every device the shop
+// currently has in one call (admin_revoke_shop), then reflects that
+// locally the same way - flips each affected device's status rather
+// than re-fetching, so the table updates instantly.
+async function revokeShop(shopId, name) {
+  if (!confirm(`Revoke "${name}"? Every device this shop has will immediately lose all access and cannot authenticate again. This cannot be undone from here.`)) {
+    return;
+  }
+  const secret = adminSecret();
+  const platformUrl = document.getElementById('platformUrl').value.trim();
+  try {
+    const res = await fetch(platformUrl + '?action=admin_revoke_shop', {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': secret, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shop_id: shopId }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      alert(data.message || 'Could not revoke that shop.');
+      return;
+    }
+    for (const { device } of deviceRows) {
+      if (device && device.shop_id === shopId) device.status = 'disabled';
+    }
     renderRows();
   } catch (e) {
     alert('Could not reach the server: ' + e);
