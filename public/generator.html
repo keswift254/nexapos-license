@@ -243,16 +243,16 @@
     <div class="grid-2">
       <div>
         <label for="publishWindowsInstallerUrl">Windows setup EXE URL</label>
-        <input id="publishWindowsInstallerUrl" onchange="hashPublishFile('windowsInstaller')">
-        <label for="publishWindowsInstallerSha256">SHA-256 (computed from the file above)</label>
-        <input id="publishWindowsInstallerSha256" placeholder="Click &quot;Fetch &amp; verify files&quot; below" readonly>
+        <input id="publishWindowsInstallerUrl" onchange="hashPublishFile('windowsInstaller')" oninput="updatePublishButtonState()">
+        <label for="publishWindowsInstallerSha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
+        <input id="publishWindowsInstallerSha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
         <div class="progress-text" id="publishWindowsInstallerProgress"></div>
       </div>
       <div>
         <label for="publishAndroidUrl">Android download URL</label>
-        <input id="publishAndroidUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-1.0.12.apk" onchange="hashPublishFile('android')">
-        <label for="publishAndroidSha256">SHA-256 (computed from the file at the URL above)</label>
-        <input id="publishAndroidSha256" placeholder="Click &quot;Fetch &amp; verify files&quot; below" readonly>
+        <input id="publishAndroidUrl" value="https://keswift254.github.io/nexapos-site/downloads/NexaPOS-1.0.12.apk" onchange="hashPublishFile('android')" oninput="updatePublishButtonState()">
+        <label for="publishAndroidSha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
+        <input id="publishAndroidSha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
         <div class="progress-text" id="publishAndroidProgress"></div>
       </div>
     </div>
@@ -355,9 +355,10 @@ async function loadSuggestedVersion() {
   }
 }
 
-// onProgress(receivedBytes, totalBytes|0, phase) where phase is
-// 'downloading' or 'hashing' - lets the caller show real numbers instead
-// of a placeholder that can't be told apart from being stuck.
+// onProgress(receivedBytes, totalBytes|0, phase, bytesPerSec) where
+// phase is 'downloading' or 'hashing' - lets the caller show real
+// numbers instead of a placeholder that can't be told apart from being
+// stuck.
 async function sha256OfUrl(url, onProgress) {
   // A multi-ten-megabyte download over a flaky connection can drop with
   // a generic "Failed to fetch" that a plain retry clears right up -
@@ -377,12 +378,24 @@ async function sha256OfUrl(url, onProgress) {
       const reader = res.body.getReader();
       const chunks = [];
       let received = 0;
+      // Instantaneous rate over the window since the last UI update
+      // (throttled to ~4x/sec) rather than a running average since the
+      // start - a running average would still read "slow" for a while
+      // after a bad start even once the transfer actually sped up.
+      let windowStart = performance.now();
+      let windowBytes = 0;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
         chunks.push(value);
         received += value.length;
-        if (onProgress) onProgress(received, total, 'downloading');
+        windowBytes += value.length;
+        const elapsed = performance.now() - windowStart;
+        if (onProgress && elapsed >= 250) {
+          onProgress(received, total, 'downloading', windowBytes / (elapsed / 1000));
+          windowStart = performance.now();
+          windowBytes = 0;
+        }
       }
       const buffer = new Uint8Array(received);
       let offset = 0;
@@ -404,14 +417,24 @@ function formatMB(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-// Fetches the real file currently sitting at the Windows/Android URL
-// and hashes it client-side - this is deliberately NOT something the
-// admin types in, so the hash can never drift from what the URL
-// actually serves. If it matches the hash already published for the
-// current live version, the file hasn't changed since last time, which
-// means publishing a new version number now would announce an update
-// with nothing behind it - so this refuses to arm the Publish button
-// until every platform's file has genuinely changed.
+function formatSpeed(bytesPerSec) {
+  return (bytesPerSec / (1024 * 1024)).toFixed(2) + ' MB/s';
+}
+
+function isValidSha256(value) {
+  return /^[0-9a-f]{64}$/i.test(value.trim());
+}
+
+// Publishing no longer strictly requires this - the SHA-256 fields are
+// plain editable inputs, so a hash already known from a local build
+// (computed by whatever's fastest on hand, without waiting on a
+// download through this page) can just be pasted in directly. This
+// fetches the real file at the Windows/Android URL and hashes it
+// client-side as the slower but drift-proof alternative: the hash can
+// never be wrong relative to what the URL actually serves, and (see
+// hashBothPublishFiles) it also catches "that URL still serves the old
+// build" before a version bump announces an update with nothing new
+// behind it - neither of which a pasted-in hash can promise.
 async function hashPublishFile(platform) {
   const fieldIds = {
     windowsInstaller: ['publishWindowsInstallerUrl', 'publishWindowsInstallerSha256', 'publishWindowsInstallerProgress'],
@@ -427,26 +450,43 @@ async function hashPublishFile(platform) {
   shaField.placeholder = 'Fetching and hashing...';
   if (progressEl) progressEl.textContent = 'Starting…';
   try {
-    const hash = await sha256OfUrl(url, (received, total, phase) => {
+    const hash = await sha256OfUrl(url, (received, total, phase, bytesPerSec) => {
       if (!progressEl) return;
       if (phase === 'hashing') {
         progressEl.textContent = 'Verifying checksum…';
       } else if (total) {
         const pct = Math.round((received / total) * 100);
-        progressEl.textContent = `Downloading… ${formatMB(received)} / ${formatMB(total)} (${pct}%)`;
+        progressEl.textContent = `Downloading… ${formatMB(received)} / ${formatMB(total)} (${pct}%) - ${formatSpeed(bytesPerSec)}`;
       } else {
-        progressEl.textContent = `Downloading… ${formatMB(received)}`;
+        progressEl.textContent = `Downloading… ${formatMB(received)} - ${formatSpeed(bytesPerSec)}`;
       }
     });
     shaField.value = hash;
     shaField.placeholder = '';
+    updatePublishButtonState();
     if (progressEl) progressEl.textContent = 'Verified ✓';
     return hash;
   } catch (e) {
     shaField.placeholder = 'Could not fetch/hash this file: ' + e;
     if (progressEl) progressEl.textContent = '';
+    updatePublishButtonState();
     return null;
   }
+}
+
+// Publish only needs both URLs filled in and both SHA-256 fields
+// holding something that's at least shaped like a real hash - it
+// doesn't care whether that hash arrived by typing it in or by
+// hashPublishFile() actually fetching the file, so this is the single
+// place both paths funnel through to arm/disarm the button.
+function updatePublishButtonState() {
+  const windowsInstallerUrl = document.getElementById('publishWindowsInstallerUrl').value.trim();
+  const androidUrl = document.getElementById('publishAndroidUrl').value.trim();
+  const windowsInstallerSha256 = document.getElementById('publishWindowsInstallerSha256').value;
+  const androidSha256 = document.getElementById('publishAndroidSha256').value;
+  const ready = windowsInstallerUrl && androidUrl &&
+    isValidSha256(windowsInstallerSha256) && isValidSha256(androidSha256);
+  document.getElementById('publishBtn').disabled = !ready;
 }
 
 async function hashBothPublishFiles() {
@@ -479,10 +519,14 @@ async function hashBothPublishFiles() {
           + `looks like the new build wasn't actually pushed to the download site yet. Rebuild and push first, then try again.`,
         false,
       );
+      // Overrides updatePublishButtonState()'s otherwise-correct "both
+      // fields look like valid hashes" verdict - a hash that's real but
+      // identical to the currently-published one is exactly the case
+      // this whole check exists to block.
+      publishBtn.disabled = true;
       return;
     }
     showMsg('hashMsg', 'Setup EXE and APK verified and are genuinely different from the currently-published version.', true);
-    publishBtn.disabled = false;
   } finally {
     btn.disabled = false;
   }
@@ -693,13 +737,14 @@ async function publishVersion() {
     showMsg('publishMsg', 'Version, Windows setup EXE URL, and Android URL are all required.', false);
     return;
   }
-  if (!windowsInstallerSha256 || !androidSha256) {
-    // Shouldn't be reachable - the button is disabled until
-    // hashBothPublishFiles() succeeds - but this is the one action in
-    // the whole page that actually ships an update to every installed
-    // device, so it gets its own belt-and-suspenders check rather than
-    // trusting button-disabled state alone.
-    showMsg('publishMsg', 'Click "Fetch & verify files" first - publishing without a verified checksum is disabled.', false);
+  if (!isValidSha256(windowsInstallerSha256) || !isValidSha256(androidSha256)) {
+    // Shouldn't be reachable - updatePublishButtonState() disables the
+    // button until both SHA-256 fields look valid, whether pasted in
+    // manually or filled by "Fetch & verify files" - but this is the
+    // one action in the whole page that actually ships an update to
+    // every installed device, so it gets its own belt-and-suspenders
+    // check rather than trusting button-disabled state alone.
+    showMsg('publishMsg', 'Both SHA-256 fields need a valid 64-character hash - paste one in, or click "Fetch & verify files".', false);
     return;
   }
   try {
