@@ -339,11 +339,24 @@ async function loadSuggestedVersion() {
 }
 
 async function sha256OfUrl(url) {
-  const res = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const buffer = await res.arrayBuffer();
-  const digest = await crypto.subtle.digest('SHA-256', buffer);
-  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+  // A multi-ten-megabyte download over a flaky connection can drop with
+  // a generic "Failed to fetch" that a plain retry clears right up -
+  // seen in practice on the ~75MB Android APK specifically, never the
+  // much smaller Windows EXE. Three tries, no backoff needed since the
+  // failure mode here is a dropped connection, not a rate limit.
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buffer = await res.arrayBuffer();
+      const digest = await crypto.subtle.digest('SHA-256', buffer);
+      return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
 }
 
 // Fetches the real file currently sitting at the Windows/Android URL
@@ -384,10 +397,14 @@ async function hashBothPublishFiles() {
   publishBtn.disabled = true;
   document.getElementById('hashMsg').className = 'msg';
   try {
-    const [windowsInstallerSha, androidSha] = await Promise.all([
-      hashPublishFile('windowsInstaller'),
-      hashPublishFile('android'),
-    ]);
+    // Sequential, not Promise.all - fetching an ~18MB and ~75MB file at
+    // once was showing "Failed to fetch" on the larger APK specifically
+    // (never the smaller EXE), consistent with the combined concurrent
+    // download tripping something on the network path (a proxy/AV web
+    // shield, a flaky connection) rather than either file or its CORS
+    // headers actually being broken - both verified fine independently.
+    const windowsInstallerSha = await hashPublishFile('windowsInstaller');
+    const androidSha = await hashPublishFile('android');
     if (!windowsInstallerSha || !androidSha) {
       showMsg('hashMsg', 'Could not fetch/hash one or more files - check that the setup EXE and APK have been uploaded first.', false);
       return;
