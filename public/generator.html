@@ -397,14 +397,15 @@ async function hashBothPublishFiles() {
   publishBtn.disabled = true;
   document.getElementById('hashMsg').className = 'msg';
   try {
-    // Sequential, not Promise.all - fetching an ~18MB and ~75MB file at
-    // once was showing "Failed to fetch" on the larger APK specifically
-    // (never the smaller EXE), consistent with the combined concurrent
-    // download tripping something on the network path (a proxy/AV web
-    // shield, a flaky connection) rather than either file or its CORS
-    // headers actually being broken - both verified fine independently.
-    const windowsInstallerSha = await hashPublishFile('windowsInstaller');
-    const androidSha = await hashPublishFile('android');
+    // Parallel again for speed, relying on sha256OfUrl's own 3x retry
+    // (below) to absorb the "Failed to fetch" that was hitting the
+    // ~75MB APK specifically (never the smaller EXE) - fetching the two
+    // files one after another instead of at once would also have fixed
+    // it, but at the cost of doubling how long this takes every time.
+    const [windowsInstallerSha, androidSha] = await Promise.all([
+      hashPublishFile('windowsInstaller'),
+      hashPublishFile('android'),
+    ]);
     if (!windowsInstallerSha || !androidSha) {
       showMsg('hashMsg', 'Could not fetch/hash one or more files - check that the setup EXE and APK have been uploaded first.', false);
       return;
