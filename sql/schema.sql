@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS app_version (
     windows_sha256 CHAR(64) NULL,
     windows_installer_sha256 CHAR(64) NULL,
     android_sha256 CHAR(64) NULL,
+    windows_legacy_installer_url VARCHAR(500) NULL,
+    windows_legacy_installer_sha256 CHAR(64) NULL,
     release_notes TEXT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

@@ -14,6 +14,9 @@ class Database
 {
     private static ?PDO $connection = null;
     private static bool $installerMigrationChecked = false;
+    /** Identifies this database in the "columns already checked" note (see ensureAppVersionInstaller). */
+    private static string $databaseKey = '';
+    private const CHECK_NOTE_TTL_SECONDS = 6 * 3600;
 
     public static function connection(): PDO
     {
@@ -22,6 +25,7 @@ class Database
         }
         $config = require __DIR__ . '/../../config/config.php';
         $db = $config['db'];
+        self::$databaseKey = ($db['host'] ?? '') . '|' . ($db['port'] ?? '') . '|' . ($db['name'] ?? '');
         $dsn = self::dsn($db, true);
         try {
             self::$connection = self::newPdo($dsn, $db);
@@ -45,16 +49,31 @@ class Database
         if (!$pdo) {
             return;
         }
+        // Asking INFORMATION_SCHEMA on EVERY request costs a slow round trip to a database in
+        // another data centre each time. Once this process has seen the columns exist it leaves
+        // a small note in the temp directory and later requests skip the question; the note
+        // expires after a few hours so a restored old backup still gets re-checked.
+        $note = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'nexapos_license_app_version_columns_' . sha1(self::$databaseKey);
+        $noteTime = @filemtime($note);
+        if ($noteTime !== false && (time() - $noteTime) < self::CHECK_NOTE_TTL_SECONDS) {
+            self::$installerMigrationChecked = true;
+            return;
+        }
         $columns = $pdo->prepare(
             "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'app_version'
-             AND COLUMN_NAME IN ('windows_installer_url', 'windows_installer_sha256')"
+             AND COLUMN_NAME IN ('windows_installer_url', 'windows_installer_sha256',
+                 'windows_legacy_installer_url', 'windows_legacy_installer_sha256')"
         );
         $columns->execute();
         $existing = array_fill_keys($columns->fetchAll(PDO::FETCH_COLUMN), true);
         $statements = [
             'windows_installer_url' => 'ALTER TABLE app_version ADD COLUMN windows_installer_url VARCHAR(500) NULL AFTER windows_url',
             'windows_installer_sha256' => 'ALTER TABLE app_version ADD COLUMN windows_installer_sha256 CHAR(64) NULL AFTER windows_sha256',
+            // The Windows 7/8 edition ships its own installer (a different
+            // Flutter engine), so those installs update from these instead.
+            'windows_legacy_installer_url' => 'ALTER TABLE app_version ADD COLUMN windows_legacy_installer_url VARCHAR(500) NULL',
+            'windows_legacy_installer_sha256' => 'ALTER TABLE app_version ADD COLUMN windows_legacy_installer_sha256 CHAR(64) NULL',
         ];
         foreach ($statements as $column => $statement) {
             if (isset($existing[$column])) {
@@ -69,6 +88,7 @@ class Database
             }
         }
         self::$installerMigrationChecked = true;
+        @file_put_contents($note, gmdate('c'));
     }
 
     private static function newPdo(string $dsn, array $db): PDO

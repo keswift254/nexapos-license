@@ -256,6 +256,22 @@
         <div class="progress-text" id="publishAndroidProgress"></div>
       </div>
     </div>
+    <div class="grid-2">
+      <div>
+        <label for="publishIncludeLegacy">
+          <input type="checkbox" id="publishIncludeLegacy" style="width:auto;margin-right:8px" onchange="toggleLegacyPublish()">
+          Also publish the Windows 7/8 edition (its own installer)
+        </label>
+        <div id="legacyPublishFields" hidden>
+          <label for="publishWindowsLegacyUrl">Windows 7/8 setup EXE URL</label>
+          <input id="publishWindowsLegacyUrl" onchange="hashPublishFile('windowsLegacy')" oninput="updatePublishButtonState()">
+          <label for="publishWindowsLegacySha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
+          <input id="publishWindowsLegacySha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
+          <div class="progress-text" id="publishWindowsLegacyProgress"></div>
+        </div>
+      </div>
+      <div class="hint">Leave this unticked for a release with no Windows 7/8 build: those PCs are then simply not offered the update, instead of being sent the Windows 10 installer, which cannot start on them.</div>
+    </div>
     <button class="secondary" onclick="hashBothPublishFiles()" id="hashFilesBtn">Fetch &amp; verify files</button>
     <div class="msg" id="hashMsg"></div>
     <div class="divider-space"></div>
@@ -328,7 +344,7 @@ function incrementPatch(version) {
 // happened twice for real (1.0.2 and again at 1.0.4/1.0.5) before this
 // existed: the URLs never changed, so the "update" silently reinstalled
 // the same bits every time and devices never actually moved version.
-let publishedShas = { windowsInstaller: null, android: null };
+let publishedShas = { windowsInstaller: null, android: null, windowsLegacy: null };
 
 // github.io/downloads/, not GitHub Releases - Releases was tried for
 // real (1.0.34) on the theory that Pages' git-backed storage was the
@@ -349,6 +365,28 @@ function setSuggestedDownloadUrls(version) {
     `https://keswift254.github.io/nexapos-site/downloads/NexaPOS-${version}.apk`;
 }
 
+function suggestedLegacyUrl(version) {
+  return `https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Setup-Windows7-8-${version}.exe`;
+}
+
+function includeLegacy() {
+  return document.getElementById('publishIncludeLegacy').checked;
+}
+
+// The Windows 7/8 edition is optional per release. Unticked, its fields are
+// hidden AND cleared, so nothing left over from an earlier attempt can be
+// published by accident.
+function toggleLegacyPublish() {
+  const on = includeLegacy();
+  document.getElementById('legacyPublishFields').hidden = !on;
+  const url = document.getElementById('publishWindowsLegacyUrl');
+  const sha = document.getElementById('publishWindowsLegacySha256');
+  url.value = on ? suggestedLegacyUrl(document.getElementById('publishVersion').value.trim()) : '';
+  sha.value = '';
+  document.getElementById('publishWindowsLegacyProgress').textContent = '';
+  updatePublishButtonState();
+}
+
 async function loadSuggestedVersion() {
   const field = document.getElementById('publishVersion');
   try {
@@ -360,6 +398,7 @@ async function loadSuggestedVersion() {
       publishedShas = {
         windowsInstaller: data.windows_installer_sha256 || null,
         android: data.android_sha256 || null,
+        windowsLegacy: data.windows_legacy_installer_sha256 || null,
       };
     }
   } catch (e) {
@@ -451,6 +490,7 @@ async function hashPublishFile(platform) {
   const fieldIds = {
     windowsInstaller: ['publishWindowsInstallerUrl', 'publishWindowsInstallerSha256', 'publishWindowsInstallerProgress'],
     android: ['publishAndroidUrl', 'publishAndroidSha256', 'publishAndroidProgress'],
+    windowsLegacy: ['publishWindowsLegacyUrl', 'publishWindowsLegacySha256', 'publishWindowsLegacyProgress'],
   };
   const [urlId, shaId, progressId] = fieldIds[platform];
   const urlField = document.getElementById(urlId);
@@ -507,8 +547,11 @@ function updatePublishButtonState() {
   const androidUrl = document.getElementById('publishAndroidUrl').value.trim();
   const windowsInstallerSha256 = document.getElementById('publishWindowsInstallerSha256').value;
   const androidSha256 = document.getElementById('publishAndroidSha256').value;
+  const legacyReady = !includeLegacy() || (
+    document.getElementById('publishWindowsLegacyUrl').value.trim() &&
+    isValidSha256(document.getElementById('publishWindowsLegacySha256').value));
   const ready = windowsInstallerUrl && androidUrl &&
-    isValidSha256(windowsInstallerSha256) && isValidSha256(androidSha256);
+    isValidSha256(windowsInstallerSha256) && isValidSha256(androidSha256) && legacyReady;
   document.getElementById('publishBtn').disabled = !ready;
 }
 
@@ -529,17 +572,20 @@ async function hashBothPublishFiles() {
     // practice despite "sounding" slower on paper.
     const windowsInstallerSha = await hashPublishFile('windowsInstaller');
     const androidSha = await hashPublishFile('android');
-    if (!windowsInstallerSha || !androidSha) {
+    const legacySha = includeLegacy() ? await hashPublishFile('windowsLegacy') : true;
+    if (!windowsInstallerSha || !androidSha || !legacySha) {
       showMsg('hashMsg', 'Could not fetch/hash one or more files - check the field(s) above for details (GitHub Releases URLs need the SHA-256 pasted in manually; see the placeholder text).', false);
       return;
     }
     const staleWindowsInstaller = publishedShas.windowsInstaller && windowsInstallerSha === publishedShas.windowsInstaller;
     const staleAndroid = publishedShas.android && androidSha === publishedShas.android;
-    if (staleWindowsInstaller || staleAndroid) {
-      const which = [staleWindowsInstaller && 'Windows setup EXE', staleAndroid && 'Android'].filter(Boolean).join(', ');
+    const staleLegacy = includeLegacy() && publishedShas.windowsLegacy && legacySha === publishedShas.windowsLegacy;
+    if (staleWindowsInstaller || staleAndroid || staleLegacy) {
+      const staleList = [staleWindowsInstaller && 'Windows setup EXE', staleAndroid && 'Android', staleLegacy && 'Windows 7/8 setup EXE'].filter(Boolean);
+      const which = staleList.join(', ');
       showMsg(
         'hashMsg',
-        `${which} file${[staleWindowsInstaller, staleAndroid].filter(Boolean).length > 1 ? 's are' : ' is'} identical to what's already published - `
+        `${which} file${staleList.length > 1 ? 's are' : ' is'} identical to what's already published - `
           + `looks like the new build wasn't actually pushed to the download site yet. Rebuild and push first, then try again.`,
         false,
       );
@@ -550,7 +596,7 @@ async function hashBothPublishFiles() {
       publishBtn.disabled = true;
       return;
     }
-    showMsg('hashMsg', 'Setup EXE and APK verified and are genuinely different from the currently-published version.', true);
+    showMsg('hashMsg', 'Every file verified and is genuinely different from the currently-published version.', true);
   } finally {
     btn.disabled = false;
   }
@@ -773,7 +819,13 @@ async function publishVersion() {
   const windowsInstallerSha256 = document.getElementById('publishWindowsInstallerSha256').value.trim();
   const androidSha256 = document.getElementById('publishAndroidSha256').value.trim();
   const releaseNotes = document.getElementById('publishNotes').value.trim();
+  const legacyUrl = includeLegacy() ? document.getElementById('publishWindowsLegacyUrl').value.trim() : '';
+  const legacySha256 = includeLegacy() ? document.getElementById('publishWindowsLegacySha256').value.trim() : '';
   document.getElementById('publishMsg').className = 'msg';
+  if (includeLegacy() && (!legacyUrl || !isValidSha256(legacySha256))) {
+    showMsg('publishMsg', 'The Windows 7/8 edition is ticked, so it needs both its URL and a valid 64-character SHA-256 (or untick it).', false);
+    return;
+  }
   if (!version || !windowsInstallerUrl || !androidUrl) {
     showMsg('publishMsg', 'Version, Windows setup EXE URL, and Android URL are all required.', false);
     return;
@@ -791,12 +843,13 @@ async function publishVersion() {
   const publishBtn = document.getElementById('publishBtn');
   publishBtn.disabled = true;
   showMsg('publishMsg', 'Checking that both URLs actually exist before publishing…', true);
-  const [windowsInstallerOk, androidOk] = await Promise.all([
+  const [windowsInstallerOk, androidOk, legacyOk] = await Promise.all([
     urlExists(windowsInstallerUrl),
     urlExists(androidUrl),
+    legacyUrl ? urlExists(legacyUrl) : Promise.resolve(true),
   ]);
-  if (!windowsInstallerOk || !androidOk) {
-    const which = [!windowsInstallerOk && 'Windows setup EXE', !androidOk && 'Android'].filter(Boolean).join(', ');
+  if (!windowsInstallerOk || !androidOk || !legacyOk) {
+    const which = [!windowsInstallerOk && 'Windows setup EXE', !androidOk && 'Android', !legacyOk && 'Windows 7/8 setup EXE'].filter(Boolean).join(', ');
     showMsg(
       'publishMsg',
       `${which} URL doesn't actually resolve (404 or unreachable) - this is exactly what put a broken update in front of every device last time. Fix the URL before publishing.`,
@@ -815,6 +868,10 @@ async function publishVersion() {
         android_url: androidUrl,
         windows_installer_sha256: windowsInstallerSha256,
         android_sha256: androidSha256,
+        // Blank when unticked: the server then CLEARS any earlier legacy
+        // installer so a Windows 7/8 PC is never pointed at an older one.
+        windows_legacy_installer_url: legacyUrl,
+        windows_legacy_installer_sha256: legacySha256,
         release_notes: releaseNotes,
       }),
     });
@@ -826,7 +883,7 @@ async function publishVersion() {
       // verified fresh - prevents an accidental double-click (or a
       // second "publish" for a version that hasn't actually changed
       // again) from sailing through on stale button-enabled state.
-      publishedShas = { windowsInstaller: windowsInstallerSha256, android: androidSha256 };
+      publishedShas = { windowsInstaller: windowsInstallerSha256, android: androidSha256, windowsLegacy: legacySha256 || null };
       document.getElementById('publishBtn').disabled = true;
     } else {
       showMsg('publishMsg', data.message || 'Could not publish the update.', false);
