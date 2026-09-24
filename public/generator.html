@@ -272,6 +272,43 @@
       </div>
       <div class="hint">Leave this unticked for a release with no Windows 7/8 build: those PCs are then simply not offered the update, instead of being sent the Windows 10 installer, which cannot start on them.</div>
     </div>
+    <div class="grid-2">
+      <div>
+        <label for="publishIncludePatches">
+          <input type="checkbox" id="publishIncludePatches" style="width:auto;margin-right:8px" onchange="togglePatchPublish()">
+          Also publish delta/incremental patches (advanced)
+        </label>
+        <div id="patchPublishFields" hidden>
+          <label for="publishPatchFromVersion">Patch built FROM version (only devices already on exactly this version can use it)</label>
+          <input id="publishPatchFromVersion" placeholder="e.g. 1.0.45" oninput="updatePublishButtonState()">
+
+          <label for="publishAndroidPatchUrl">Android patch (.nxpatch) URL - optional</label>
+          <input id="publishAndroidPatchUrl" onchange="hashPublishFile('androidPatch')" oninput="updatePublishButtonState()">
+          <label for="publishAndroidPatchSha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
+          <input id="publishAndroidPatchSha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
+          <div class="progress-text" id="publishAndroidPatchProgress"></div>
+
+          <label for="publishWindowsInstallerPatchUrl">Windows 10/11 patch bundle (.nxbundle) URL - optional</label>
+          <input id="publishWindowsInstallerPatchUrl" onchange="hashPublishFile('windowsInstallerPatch')" oninput="updatePublishButtonState()">
+          <label for="publishWindowsInstallerPatchSha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
+          <input id="publishWindowsInstallerPatchSha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
+          <div class="progress-text" id="publishWindowsInstallerPatchProgress"></div>
+
+          <label for="publishWindowsLegacyPatchUrl">Windows 7/8 patch bundle (.nxbundle) URL - optional, only used if the Windows 7/8 edition above is also ticked</label>
+          <input id="publishWindowsLegacyPatchUrl" onchange="hashPublishFile('windowsLegacyPatch')" oninput="updatePublishButtonState()">
+          <label for="publishWindowsLegacyPatchSha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
+          <input id="publishWindowsLegacyPatchSha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
+          <div class="progress-text" id="publishWindowsLegacyPatchProgress"></div>
+
+          <label for="publishPatchApplierUrl">Windows patch applier (NexaPosPatchApply.exe) URL - only needed if either Windows patch bundle above is filled in; stable across releases, usually unchanged</label>
+          <input id="publishPatchApplierUrl" onchange="hashPublishFile('patchApplier')" oninput="updatePublishButtonState()">
+          <label for="publishPatchApplierSha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
+          <input id="publishPatchApplierSha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
+          <div class="progress-text" id="publishPatchApplierProgress"></div>
+        </div>
+      </div>
+      <div class="hint">A device already on the "built FROM" version downloads a small binary patch instead of the full install - falls back to the normal full download automatically if anything doesn't check out. Leave everything here blank for a normal release; nothing here is ever required.</div>
+    </div>
     <button class="secondary" onclick="hashBothPublishFiles()" id="hashFilesBtn">Fetch &amp; verify files</button>
     <div class="msg" id="hashMsg"></div>
     <div class="divider-space"></div>
@@ -344,7 +381,20 @@ function incrementPatch(version) {
 // happened twice for real (1.0.2 and again at 1.0.4/1.0.5) before this
 // existed: the URLs never changed, so the "update" silently reinstalled
 // the same bits every time and devices never actually moved version.
-let publishedShas = { windowsInstaller: null, android: null, windowsLegacy: null };
+let publishedShas = {
+  windowsInstaller: null,
+  android: null,
+  windowsLegacy: null,
+  // Tracked alongside the hashes above so the delta-patch box (see
+  // togglePatchPublish) can prefill "built FROM version" with the
+  // version this page loaded as currently-published, and can carry the
+  // patch applier's URL/hash forward release to release without
+  // re-pasting it every time - it rarely changes (see patch_applier_url's
+  // own doc comment in update_gateway.dart).
+  currentVersion: null,
+  patchApplierUrl: null,
+  patchApplierSha256: null,
+};
 
 // github.io/downloads/, not GitHub Releases - Releases was tried for
 // real (1.0.34) on the theory that Pages' git-backed storage was the
@@ -387,6 +437,35 @@ function toggleLegacyPublish() {
   updatePublishButtonState();
 }
 
+function includePatches() {
+  return document.getElementById('publishIncludePatches').checked;
+}
+
+// Same "hide AND clear when unticked" rule as toggleLegacyPublish, for the
+// same reason: nothing left over from an earlier attempt (or an earlier
+// release that used patches) can be published by accident just because the
+// box happens to be unticked this time. Turning it back ON re-prefills
+// "built FROM version" and the patch applier fields from whatever this page
+// most recently saw as currently published (see loadSuggestedVersion) - the
+// applier in particular rarely changes release to release, so this saves
+// re-pasting it every time.
+function togglePatchPublish() {
+  const on = includePatches();
+  document.getElementById('patchPublishFields').hidden = !on;
+  document.getElementById('publishPatchFromVersion').value = on ? (publishedShas.currentVersion || '') : '';
+  document.getElementById('publishAndroidPatchUrl').value = '';
+  document.getElementById('publishAndroidPatchSha256').value = '';
+  document.getElementById('publishWindowsInstallerPatchUrl').value = '';
+  document.getElementById('publishWindowsInstallerPatchSha256').value = '';
+  document.getElementById('publishWindowsLegacyPatchUrl').value = '';
+  document.getElementById('publishWindowsLegacyPatchSha256').value = '';
+  document.getElementById('publishPatchApplierUrl').value = on ? (publishedShas.patchApplierUrl || '') : '';
+  document.getElementById('publishPatchApplierSha256').value = on ? (publishedShas.patchApplierSha256 || '') : '';
+  ['publishAndroidPatchProgress', 'publishWindowsInstallerPatchProgress', 'publishWindowsLegacyPatchProgress', 'publishPatchApplierProgress']
+    .forEach((id) => { document.getElementById(id).textContent = ''; });
+  updatePublishButtonState();
+}
+
 async function loadSuggestedVersion() {
   const field = document.getElementById('publishVersion');
   try {
@@ -399,6 +478,9 @@ async function loadSuggestedVersion() {
         windowsInstaller: data.windows_installer_sha256 || null,
         android: data.android_sha256 || null,
         windowsLegacy: data.windows_legacy_installer_sha256 || null,
+        currentVersion: data.version || null,
+        patchApplierUrl: data.patch_applier_url || null,
+        patchApplierSha256: data.patch_applier_sha256 || null,
       };
     }
   } catch (e) {
@@ -491,6 +573,10 @@ async function hashPublishFile(platform) {
     windowsInstaller: ['publishWindowsInstallerUrl', 'publishWindowsInstallerSha256', 'publishWindowsInstallerProgress'],
     android: ['publishAndroidUrl', 'publishAndroidSha256', 'publishAndroidProgress'],
     windowsLegacy: ['publishWindowsLegacyUrl', 'publishWindowsLegacySha256', 'publishWindowsLegacyProgress'],
+    androidPatch: ['publishAndroidPatchUrl', 'publishAndroidPatchSha256', 'publishAndroidPatchProgress'],
+    windowsInstallerPatch: ['publishWindowsInstallerPatchUrl', 'publishWindowsInstallerPatchSha256', 'publishWindowsInstallerPatchProgress'],
+    windowsLegacyPatch: ['publishWindowsLegacyPatchUrl', 'publishWindowsLegacyPatchSha256', 'publishWindowsLegacyPatchProgress'],
+    patchApplier: ['publishPatchApplierUrl', 'publishPatchApplierSha256', 'publishPatchApplierProgress'],
   };
   const [urlId, shaId, progressId] = fieldIds[platform];
   const urlField = document.getElementById(urlId);
@@ -542,6 +628,15 @@ async function hashPublishFile(platform) {
 // doesn't care whether that hash arrived by typing it in or by
 // hashPublishFile() actually fetching the file, so this is the single
 // place both paths funnel through to arm/disarm the button.
+// A patch pair is "ready" either left completely blank (it's optional) or
+// filled in with a URL and a validly-shaped SHA-256 - same permissive-but-
+// not-half-filled-in rule applied to each of the four patch pairs below.
+function patchPairReady(urlId, shaId) {
+  const url = document.getElementById(urlId).value.trim();
+  if (!url) return true;
+  return isValidSha256(document.getElementById(shaId).value);
+}
+
 function updatePublishButtonState() {
   const windowsInstallerUrl = document.getElementById('publishWindowsInstallerUrl').value.trim();
   const androidUrl = document.getElementById('publishAndroidUrl').value.trim();
@@ -550,8 +645,13 @@ function updatePublishButtonState() {
   const legacyReady = !includeLegacy() || (
     document.getElementById('publishWindowsLegacyUrl').value.trim() &&
     isValidSha256(document.getElementById('publishWindowsLegacySha256').value));
+  const patchesReady = !includePatches() || (
+    patchPairReady('publishAndroidPatchUrl', 'publishAndroidPatchSha256') &&
+    patchPairReady('publishWindowsInstallerPatchUrl', 'publishWindowsInstallerPatchSha256') &&
+    patchPairReady('publishWindowsLegacyPatchUrl', 'publishWindowsLegacyPatchSha256') &&
+    patchPairReady('publishPatchApplierUrl', 'publishPatchApplierSha256'));
   const ready = windowsInstallerUrl && androidUrl &&
-    isValidSha256(windowsInstallerSha256) && isValidSha256(androidSha256) && legacyReady;
+    isValidSha256(windowsInstallerSha256) && isValidSha256(androidSha256) && legacyReady && patchesReady;
   document.getElementById('publishBtn').disabled = !ready;
 }
 
@@ -821,6 +921,15 @@ async function publishVersion() {
   const releaseNotes = document.getElementById('publishNotes').value.trim();
   const legacyUrl = includeLegacy() ? document.getElementById('publishWindowsLegacyUrl').value.trim() : '';
   const legacySha256 = includeLegacy() ? document.getElementById('publishWindowsLegacySha256').value.trim() : '';
+  const patchFromVersion = includePatches() ? document.getElementById('publishPatchFromVersion').value.trim() : '';
+  const androidPatchUrl = includePatches() ? document.getElementById('publishAndroidPatchUrl').value.trim() : '';
+  const androidPatchSha256 = includePatches() ? document.getElementById('publishAndroidPatchSha256').value.trim() : '';
+  const windowsInstallerPatchUrl = includePatches() ? document.getElementById('publishWindowsInstallerPatchUrl').value.trim() : '';
+  const windowsInstallerPatchSha256 = includePatches() ? document.getElementById('publishWindowsInstallerPatchSha256').value.trim() : '';
+  const windowsLegacyPatchUrl = includePatches() ? document.getElementById('publishWindowsLegacyPatchUrl').value.trim() : '';
+  const windowsLegacyPatchSha256 = includePatches() ? document.getElementById('publishWindowsLegacyPatchSha256').value.trim() : '';
+  const patchApplierUrl = includePatches() ? document.getElementById('publishPatchApplierUrl').value.trim() : '';
+  const patchApplierSha256 = includePatches() ? document.getElementById('publishPatchApplierSha256').value.trim() : '';
   document.getElementById('publishMsg').className = 'msg';
   if (includeLegacy() && (!legacyUrl || !isValidSha256(legacySha256))) {
     showMsg('publishMsg', 'The Windows 7/8 edition is ticked, so it needs both its URL and a valid 64-character SHA-256 (or untick it).', false);
@@ -840,19 +949,48 @@ async function publishVersion() {
     showMsg('publishMsg', 'Both SHA-256 fields need a valid 64-character hash - paste one in, or click "Fetch & verify files".', false);
     return;
   }
+  const anyPatchTarget = androidPatchUrl || windowsInstallerPatchUrl || windowsLegacyPatchUrl;
+  if (anyPatchTarget && !patchFromVersion) {
+    showMsg('publishMsg', 'A patch URL is filled in but "Patch built FROM version" is blank - devices would never be able to use it. Fill it in, or clear the patch URL(s).', false);
+    return;
+  }
+  if (patchFromVersion && patchFromVersion === version) {
+    showMsg('publishMsg', '"Patch built FROM version" cannot be the same as the version being published.', false);
+    return;
+  }
+  if ((windowsInstallerPatchUrl || windowsLegacyPatchUrl) && (!patchApplierUrl || !isValidSha256(patchApplierSha256))) {
+    showMsg('publishMsg', 'A Windows patch bundle is filled in, so the patch applier needs both its URL and a valid 64-character SHA-256 too.', false);
+    return;
+  }
+  for (const [label, url, sha256] of [
+    ['Android patch', androidPatchUrl, androidPatchSha256],
+    ['Windows 10/11 patch bundle', windowsInstallerPatchUrl, windowsInstallerPatchSha256],
+    ['Windows 7/8 patch bundle', windowsLegacyPatchUrl, windowsLegacyPatchSha256],
+    ['patch applier', patchApplierUrl, patchApplierSha256],
+  ]) {
+    if (url && !isValidSha256(sha256)) {
+      showMsg('publishMsg', `${label} has a URL but no valid 64-character SHA-256 - paste one in, or click "Fetch & verify files".`, false);
+      return;
+    }
+  }
   const publishBtn = document.getElementById('publishBtn');
   publishBtn.disabled = true;
-  showMsg('publishMsg', 'Checking that both URLs actually exist before publishing…', true);
-  const [windowsInstallerOk, androidOk, legacyOk] = await Promise.all([
-    urlExists(windowsInstallerUrl),
-    urlExists(androidUrl),
-    legacyUrl ? urlExists(legacyUrl) : Promise.resolve(true),
-  ]);
-  if (!windowsInstallerOk || !androidOk || !legacyOk) {
-    const which = [!windowsInstallerOk && 'Windows setup EXE', !androidOk && 'Android', !legacyOk && 'Windows 7/8 setup EXE'].filter(Boolean).join(', ');
+  showMsg('publishMsg', 'Checking that every URL actually exists before publishing…', true);
+  const urlChecks = [
+    ['Windows setup EXE', windowsInstallerUrl],
+    ['Android', androidUrl],
+    ['Windows 7/8 setup EXE', legacyUrl],
+    ['Android patch', androidPatchUrl],
+    ['Windows 10/11 patch bundle', windowsInstallerPatchUrl],
+    ['Windows 7/8 patch bundle', windowsLegacyPatchUrl],
+    ['patch applier', patchApplierUrl],
+  ].filter(([, url]) => url);
+  const results = await Promise.all(urlChecks.map(([, url]) => urlExists(url)));
+  const failed = urlChecks.filter((_, i) => !results[i]).map(([label]) => label);
+  if (failed.length) {
     showMsg(
       'publishMsg',
-      `${which} URL doesn't actually resolve (404 or unreachable) - this is exactly what put a broken update in front of every device last time. Fix the URL before publishing.`,
+      `${failed.join(', ')} URL doesn't actually resolve (404 or unreachable) - this is exactly what put a broken update in front of every device last time. Fix the URL before publishing.`,
       false,
     );
     updatePublishButtonState();
@@ -872,6 +1010,18 @@ async function publishVersion() {
         // installer so a Windows 7/8 PC is never pointed at an older one.
         windows_legacy_installer_url: legacyUrl,
         windows_legacy_installer_sha256: legacySha256,
+        // Likewise blank when the patches box is unticked - the server
+        // clears all of these too, so a patch built for an earlier
+        // release can never survive into one it wasn't actually built for.
+        patch_from_version: patchFromVersion,
+        android_patch_url: androidPatchUrl,
+        android_patch_sha256: androidPatchSha256,
+        windows_installer_patch_url: windowsInstallerPatchUrl,
+        windows_installer_patch_sha256: windowsInstallerPatchSha256,
+        windows_legacy_installer_patch_url: windowsLegacyPatchUrl,
+        windows_legacy_installer_patch_sha256: windowsLegacyPatchSha256,
+        patch_applier_url: patchApplierUrl,
+        patch_applier_sha256: patchApplierSha256,
         release_notes: releaseNotes,
       }),
     });
@@ -883,7 +1033,14 @@ async function publishVersion() {
       // verified fresh - prevents an accidental double-click (or a
       // second "publish" for a version that hasn't actually changed
       // again) from sailing through on stale button-enabled state.
-      publishedShas = { windowsInstaller: windowsInstallerSha256, android: androidSha256, windowsLegacy: legacySha256 || null };
+      publishedShas = {
+        windowsInstaller: windowsInstallerSha256,
+        android: androidSha256,
+        windowsLegacy: legacySha256 || null,
+        currentVersion: version,
+        patchApplierUrl: patchApplierUrl || null,
+        patchApplierSha256: patchApplierSha256 || null,
+      };
       document.getElementById('publishBtn').disabled = true;
     } else {
       showMsg('publishMsg', data.message || 'Could not publish the update.', false);
