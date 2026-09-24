@@ -63,7 +63,11 @@ class Database
             "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'app_version'
              AND COLUMN_NAME IN ('windows_installer_url', 'windows_installer_sha256',
-                 'windows_legacy_installer_url', 'windows_legacy_installer_sha256')"
+                 'windows_legacy_installer_url', 'windows_legacy_installer_sha256',
+                 'patch_from_version', 'android_patch_url', 'android_patch_sha256',
+                 'windows_installer_patch_url', 'windows_installer_patch_sha256',
+                 'windows_legacy_installer_patch_url', 'windows_legacy_installer_patch_sha256',
+                 'patch_applier_url', 'patch_applier_sha256')"
         );
         $columns->execute();
         $existing = array_fill_keys($columns->fetchAll(PDO::FETCH_COLUMN), true);
@@ -74,6 +78,16 @@ class Database
             // Flutter engine), so those installs update from these instead.
             'windows_legacy_installer_url' => 'ALTER TABLE app_version ADD COLUMN windows_legacy_installer_url VARCHAR(500) NULL',
             'windows_legacy_installer_sha256' => 'ALTER TABLE app_version ADD COLUMN windows_legacy_installer_sha256 CHAR(64) NULL',
+            // Delta/incremental update fields - see sql/migrations/20260924_004_app_version_patch_fields.sql.
+            'patch_from_version' => 'ALTER TABLE app_version ADD COLUMN patch_from_version VARCHAR(20) NULL',
+            'android_patch_url' => 'ALTER TABLE app_version ADD COLUMN android_patch_url VARCHAR(500) NULL',
+            'android_patch_sha256' => 'ALTER TABLE app_version ADD COLUMN android_patch_sha256 CHAR(64) NULL',
+            'windows_installer_patch_url' => 'ALTER TABLE app_version ADD COLUMN windows_installer_patch_url VARCHAR(500) NULL',
+            'windows_installer_patch_sha256' => 'ALTER TABLE app_version ADD COLUMN windows_installer_patch_sha256 CHAR(64) NULL',
+            'windows_legacy_installer_patch_url' => 'ALTER TABLE app_version ADD COLUMN windows_legacy_installer_patch_url VARCHAR(500) NULL',
+            'windows_legacy_installer_patch_sha256' => 'ALTER TABLE app_version ADD COLUMN windows_legacy_installer_patch_sha256 CHAR(64) NULL',
+            'patch_applier_url' => 'ALTER TABLE app_version ADD COLUMN patch_applier_url VARCHAR(500) NULL',
+            'patch_applier_sha256' => 'ALTER TABLE app_version ADD COLUMN patch_applier_sha256 CHAR(64) NULL',
         ];
         foreach ($statements as $column => $statement) {
             if (isset($existing[$column])) {

@@ -669,16 +669,21 @@ if ($action === 'extend' && $method === 'POST') {
  */
 if ($action === 'latest_version' && $method === 'GET') {
     try {
-        $stmt = $pdo->query('SELECT version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, windows_legacy_installer_url, windows_legacy_installer_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
+        $stmt = $pdo->query('SELECT version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, windows_legacy_installer_url, windows_legacy_installer_sha256, patch_from_version, android_patch_url, android_patch_sha256, windows_installer_patch_url, windows_installer_patch_sha256, windows_legacy_installer_patch_url, windows_legacy_installer_patch_sha256, patch_applier_url, patch_applier_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
     } catch (\PDOException $e) {
         // Keep existing installs checking for updates while the one-time
         // column migrations are being applied to the live database.
         if (($e->errorInfo[1] ?? null) !== 1054) throw $e;
         try {
-            $stmt = $pdo->query('SELECT version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
+            $stmt = $pdo->query('SELECT version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, windows_legacy_installer_url, windows_legacy_installer_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
         } catch (\PDOException $e) {
             if (($e->errorInfo[1] ?? null) !== 1054) throw $e;
-            $stmt = $pdo->query('SELECT version, windows_url, android_url, windows_sha256, android_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
+            try {
+                $stmt = $pdo->query('SELECT version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
+            } catch (\PDOException $e) {
+                if (($e->errorInfo[1] ?? null) !== 1054) throw $e;
+                $stmt = $pdo->query('SELECT version, windows_url, android_url, windows_sha256, android_sha256, release_notes, updated_at FROM app_version WHERE id = 1');
+            }
         }
     }
     $row = $stmt->fetch();
@@ -689,6 +694,15 @@ if ($action === 'latest_version' && $method === 'GET') {
     $row['windows_installer_sha256'] = $row['windows_installer_sha256'] ?? null;
     $row['windows_legacy_installer_url'] = $row['windows_legacy_installer_url'] ?? null;
     $row['windows_legacy_installer_sha256'] = $row['windows_legacy_installer_sha256'] ?? null;
+    $row['patch_from_version'] = $row['patch_from_version'] ?? null;
+    $row['android_patch_url'] = $row['android_patch_url'] ?? null;
+    $row['android_patch_sha256'] = $row['android_patch_sha256'] ?? null;
+    $row['windows_installer_patch_url'] = $row['windows_installer_patch_url'] ?? null;
+    $row['windows_installer_patch_sha256'] = $row['windows_installer_patch_sha256'] ?? null;
+    $row['windows_legacy_installer_patch_url'] = $row['windows_legacy_installer_patch_url'] ?? null;
+    $row['windows_legacy_installer_patch_sha256'] = $row['windows_legacy_installer_patch_sha256'] ?? null;
+    $row['patch_applier_url'] = $row['patch_applier_url'] ?? null;
+    $row['patch_applier_sha256'] = $row['patch_applier_sha256'] ?? null;
     jsonResponse(['success' => true] + $row);
 }
 
@@ -738,16 +752,53 @@ if ($action === 'set_latest_version' && $method === 'POST') {
     if ($legacyInstallerUrl !== '' && !preg_match('/^[0-9a-f]{64}$/', $legacyInstallerSha256)) {
         jsonResponse(['success' => false, 'message' => 'windows_legacy_installer_sha256 must be a 64-character hex SHA-256 when a legacy installer URL is given.'], 422);
     }
+    // Optional: a delta/incremental update built FROM patch_from_version -
+    // see nexapos_mobile's UpdateService._tryAndroidPatch/_tryWindowsPatch.
+    // Every field here is independent (a release can patch one platform but
+    // not another) and, like the legacy installer above, always fully
+    // overwritten by a publish - a patch left over from an earlier release
+    // would claim to be built from a version pairing that no longer matches
+    // what's actually being published.
+    $patchFromVersion = trim((string) ($body['patch_from_version'] ?? ''));
+    if ($patchFromVersion !== '' && $patchFromVersion === $version) {
+        jsonResponse(['success' => false, 'message' => 'patch_from_version cannot be the same as the version being published.'], 422);
+    }
+    $patchPairs = [
+        'android_patch' => ['android_patch_url', 'android_patch_sha256'],
+        'windows_installer_patch' => ['windows_installer_patch_url', 'windows_installer_patch_sha256'],
+        'windows_legacy_installer_patch' => ['windows_legacy_installer_patch_url', 'windows_legacy_installer_patch_sha256'],
+        'patch_applier' => ['patch_applier_url', 'patch_applier_sha256'],
+    ];
+    $patchValues = [];
+    foreach ($patchPairs as $label => [$urlField, $shaField]) {
+        $url = trim((string) ($body[$urlField] ?? ''));
+        $sha256 = strtolower(trim((string) ($body[$shaField] ?? '')));
+        if ($url !== '' && !preg_match('/^https:\/\//i', $url)) {
+            jsonResponse(['success' => false, 'message' => "$urlField must use HTTPS."], 422);
+        }
+        if ($url !== '' && !preg_match('/^[0-9a-f]{64}$/', $sha256)) {
+            jsonResponse(['success' => false, 'message' => "$shaField must be a 64-character hex SHA-256 when $urlField is given."], 422);
+        }
+        $patchValues[$urlField] = $url !== '' ? $url : null;
+        $patchValues[$shaField] = $url !== '' ? $sha256 : null;
+    }
     try {
         $upsert = $pdo->prepare('
-            INSERT INTO app_version (id, version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, windows_legacy_installer_url, windows_legacy_installer_sha256, release_notes)
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO app_version (id, version, windows_url, windows_installer_url, android_url, windows_sha256, windows_installer_sha256, android_sha256, windows_legacy_installer_url, windows_legacy_installer_sha256, patch_from_version, android_patch_url, android_patch_sha256, windows_installer_patch_url, windows_installer_patch_sha256, windows_legacy_installer_patch_url, windows_legacy_installer_patch_sha256, patch_applier_url, patch_applier_sha256, release_notes)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE version = VALUES(version), windows_url = VALUES(windows_url),
                 windows_installer_url = VALUES(windows_installer_url), android_url = VALUES(android_url),
                 windows_sha256 = VALUES(windows_sha256), windows_installer_sha256 = VALUES(windows_installer_sha256),
                 android_sha256 = VALUES(android_sha256),
                 windows_legacy_installer_url = VALUES(windows_legacy_installer_url),
                 windows_legacy_installer_sha256 = VALUES(windows_legacy_installer_sha256),
+                patch_from_version = VALUES(patch_from_version),
+                android_patch_url = VALUES(android_patch_url), android_patch_sha256 = VALUES(android_patch_sha256),
+                windows_installer_patch_url = VALUES(windows_installer_patch_url),
+                windows_installer_patch_sha256 = VALUES(windows_installer_patch_sha256),
+                windows_legacy_installer_patch_url = VALUES(windows_legacy_installer_patch_url),
+                windows_legacy_installer_patch_sha256 = VALUES(windows_legacy_installer_patch_sha256),
+                patch_applier_url = VALUES(patch_applier_url), patch_applier_sha256 = VALUES(patch_applier_sha256),
                 release_notes = VALUES(release_notes)
         ');
         $upsert->execute([
@@ -760,6 +811,15 @@ if ($action === 'set_latest_version' && $method === 'POST') {
             $androidSha256 !== '' ? $androidSha256 : null,
             $legacyInstallerUrl !== '' ? $legacyInstallerUrl : null,
             $legacyInstallerUrl !== '' ? $legacyInstallerSha256 : null,
+            $patchFromVersion !== '' ? $patchFromVersion : null,
+            $patchValues['android_patch_url'],
+            $patchValues['android_patch_sha256'],
+            $patchValues['windows_installer_patch_url'],
+            $patchValues['windows_installer_patch_sha256'],
+            $patchValues['windows_legacy_installer_patch_url'],
+            $patchValues['windows_legacy_installer_patch_sha256'],
+            $patchValues['patch_applier_url'],
+            $patchValues['patch_applier_sha256'],
             $releaseNotes !== '' ? $releaseNotes : null,
         ]);
     } catch (\PDOException $e) {

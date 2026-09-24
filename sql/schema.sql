@@ -81,6 +81,16 @@ CREATE TABLE IF NOT EXISTS lead_attempts (
 -- version published before this column existed doesn't need backfill
 -- to remain valid - the app treats an absent hash as "skip
 -- verification for this build" rather than a hard failure.
+-- patch_from_version/*_patch_url/*_patch_sha256/patch_applier_*: an optional
+-- delta/incremental update - a device already on patch_from_version can
+-- download a small binary patch (see nexapos_mobile's nxpatch.dart) instead
+-- of the full android_url/windows_installer_url/windows_legacy_installer_url
+-- download. All nullable and always fully overwritten by a publish (blank
+-- clears them, same as windows_legacy_installer_url above) so a patch can
+-- never survive into a release it wasn't actually built for. patch_applier_*
+-- is the small elevated Windows helper (release-tools/NexaPosPatchApply.cs)
+-- that copies an already-verified patched file into Program Files - shared
+-- across releases, published once and rarely needs to change.
 CREATE TABLE IF NOT EXISTS app_version (
     id TINYINT NOT NULL PRIMARY KEY DEFAULT 1,
     version VARCHAR(20) NOT NULL,
@@ -92,6 +102,15 @@ CREATE TABLE IF NOT EXISTS app_version (
     android_sha256 CHAR(64) NULL,
     windows_legacy_installer_url VARCHAR(500) NULL,
     windows_legacy_installer_sha256 CHAR(64) NULL,
+    patch_from_version VARCHAR(20) NULL,
+    android_patch_url VARCHAR(500) NULL,
+    android_patch_sha256 CHAR(64) NULL,
+    windows_installer_patch_url VARCHAR(500) NULL,
+    windows_installer_patch_sha256 CHAR(64) NULL,
+    windows_legacy_installer_patch_url VARCHAR(500) NULL,
+    windows_legacy_installer_patch_sha256 CHAR(64) NULL,
+    patch_applier_url VARCHAR(500) NULL,
+    patch_applier_sha256 CHAR(64) NULL,
     release_notes TEXT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
