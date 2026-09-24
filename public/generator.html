@@ -898,9 +898,12 @@ async function unrevokeLicense() {
       body: JSON.stringify({ device_id: deviceId }),
     });
     const data = await res.json();
-    // Green only when the whole job is done: the license is not revoked AND the
-    // platform did not object. A half-restored device looks fixed and is not.
-    const fullyOk = data.success === true && !data.expired && (data.license_restored || data.platform_restored);
+    // Green only when the whole job is done: something was actually restored,
+    // the platform answered (an unanswered platform leaves the device possibly
+    // still disabled), and the license has not also run out. A half-restored
+    // device looks fixed and is not.
+    const fullyOk = data.success === true && !data.expired && data.platform_reached === true
+      && (data.license_restored === true || data.platform_restored === true);
     showMsg('unrevokeMsg', data.message || 'Could not unrevoke.', fullyOk);
   } catch (e) {
     showMsg('unrevokeMsg', 'Could not reach the license server: ' + e, false);

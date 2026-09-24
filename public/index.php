@@ -665,6 +665,7 @@ if ($action === 'unrevoke' && $method === 'POST') {
     }
 
     $platformRestored = false;
+    $platformReached = false;
     $platformMessage = 'The platform was not reached.';
     try {
         $ch = curl_init(rtrim((string) $licenseConfig['platform_base_url'], '/') . '?action=admin_restore_device_by_device_id');
@@ -682,6 +683,9 @@ if ($action === 'unrevoke' && $method === 'POST') {
         curl_close($ch);
         $decoded = is_string($raw) ? json_decode($raw, true) : null;
         if (is_array($decoded)) {
+            // Answered - even "not registered here" / "not disabled" is a real
+            // answer, unlike a timeout, which leaves the outcome unknown.
+            $platformReached = true;
             $platformRestored = ($decoded['success'] ?? false) === true;
             $platformMessage = $platformRestored ? 'Sync access re-enabled.' : (string) ($decoded['message'] ?? 'The platform did not restore it.');
         }
@@ -705,6 +709,7 @@ if ($action === 'unrevoke' && $method === 'POST') {
         'code' => $license['code'],
         'license_restored' => $licenseRestored,
         'platform_restored' => $platformRestored,
+        'platform_reached' => $platformReached,
         'expired' => $expired,
         'valid_until' => $license['valid_until'],
         'message' => implode(' ', $parts),
