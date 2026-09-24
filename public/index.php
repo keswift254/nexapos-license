@@ -618,6 +618,100 @@ if ($action === 'revoke' && $method === 'POST') {
 }
 
 /**
+ * Admin action - the inverse of revoke, for a key revoked by mistake or a
+ * dispute that has since been resolved. Keyed by DEVICE ID, not by code,
+ * because the device ID is what the operator has in hand when a customer
+ * writes in (it is shown on the device's own screens) - the code may be
+ * long gone from their notes. Of the device's licenses it prefers a revoked
+ * one (the most recently revoked, if several) and clears just that key's
+ * revoked flag.
+ *
+ * Reinstating the license alone would not bring the device back: revoke
+ * also disabled it on nexapos_platform, so this asks the platform to
+ * re-enable it too. Unlike revoke - where the platform call is best-effort
+ * and silent, because the license revoke is the part that matters - here
+ * BOTH outcomes are reported back to the operator, since a device that is
+ * licensed but still disabled on the platform looks fixed and is not.
+ * Because the two steps are reported separately, running it a second time
+ * is safe and is how a platform step that timed out (a cold-starting free
+ * instance) is retried: the license part then finds nothing left to
+ * restore and only the platform part runs.
+ *
+ * After this, a device that was locked back to the activation screen just
+ * enters its own license key again - activate() lets the same device
+ * re-activate a key that is not revoked and not expired.
+ */
+if ($action === 'unrevoke' && $method === 'POST') {
+    requireAdmin($licenseConfig);
+    $body = requestBody();
+    $deviceId = trim((string) ($body['device_id'] ?? ''));
+    if ($deviceId === '' || strlen($deviceId) > 190) {
+        jsonResponse(['success' => false, 'message' => 'Enter a valid device ID.'], 422);
+    }
+
+    $find = $pdo->prepare('SELECT code, valid_until, revoked FROM license_keys WHERE device_id = ?
+        ORDER BY revoked DESC, revoked_at DESC, id DESC LIMIT 1');
+    $find->execute([$deviceId]);
+    $license = $find->fetch();
+    if (!$license) {
+        jsonResponse(['success' => false, 'message' => 'No license is registered to that device ID. Check the ID and try again.'], 404);
+    }
+
+    $licenseRestored = false;
+    if ((int) $license['revoked'] === 1) {
+        $restore = $pdo->prepare('UPDATE license_keys SET revoked = 0, revoked_at = NULL WHERE code = ? AND revoked = 1');
+        $restore->execute([$license['code']]);
+        $licenseRestored = $restore->rowCount() === 1;
+    }
+
+    $platformRestored = false;
+    $platformMessage = 'The platform was not reached.';
+    try {
+        $ch = curl_init(rtrim((string) $licenseConfig['platform_base_url'], '/') . '?action=admin_restore_device_by_device_id');
+        curl_setopt_array($ch, [
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-Admin-Secret: ' . (string) $licenseConfig['admin_secret']],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            // Generous: a free-tier instance that has been idle can take the
+            // better part of a minute to wake up.
+            CURLOPT_TIMEOUT => 45,
+            CURLOPT_CUSTOMREQUEST => 'POST',
+            CURLOPT_POSTFIELDS => json_encode(['device_id' => $deviceId]),
+        ]);
+        $raw = curl_exec($ch);
+        curl_close($ch);
+        $decoded = is_string($raw) ? json_decode($raw, true) : null;
+        if (is_array($decoded)) {
+            $platformRestored = ($decoded['success'] ?? false) === true;
+            $platformMessage = $platformRestored ? 'Sync access re-enabled.' : (string) ($decoded['message'] ?? 'The platform did not restore it.');
+        }
+    } catch (\Throwable $e) {
+        // Reported below rather than thrown: the license part already happened.
+    }
+
+    $expired = $license['valid_until'] !== null && strtotime((string) $license['valid_until'] . ' UTC') < time();
+    $parts = [];
+    $parts[] = $licenseRestored
+        ? 'License ' . $license['code'] . ' is no longer revoked.'
+        : 'License ' . $license['code'] . ' was not revoked, so nothing to restore there.';
+    $parts[] = 'Platform: ' . $platformMessage;
+    if ($expired) {
+        $parts[] = 'Note: this license has also EXPIRED (' . $license['valid_until'] . ' UTC) - extend it before the device can use it.';
+    } elseif ($licenseRestored) {
+        $parts[] = 'If the device is showing the activation screen, enter its license key again.';
+    }
+    jsonResponse([
+        'success' => true,
+        'code' => $license['code'],
+        'license_restored' => $licenseRestored,
+        'platform_restored' => $platformRestored,
+        'expired' => $expired,
+        'valid_until' => $license['valid_until'],
+        'message' => implode(' ', $parts),
+    ]);
+}
+
+/**
  * Admin action - a renewal payment on an already-activated key. Extends
  * from whichever is later, the key's current valid_until or right now
  * (GREATEST in the UPDATE below) - stacks cleanly onto remaining time

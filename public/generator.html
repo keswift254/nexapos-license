@@ -219,6 +219,15 @@
   </div>
 
   <div class="card">
+    <div class="card-title"><span class="emoji">♻️</span> Unrevoke a license</div>
+    <label for="unrevokeDevice">Device ID of the revoked device</label>
+    <input id="unrevokeDevice" placeholder="Device ID from the device's own screen, or the dashboard">
+    <button onclick="unrevokeLicense()">Unrevoke</button>
+    <div class="hint" style="margin-top:10px">Reinstates that device's revoked license and re-enables its sync access. If the device is showing the activation screen afterwards, it enters its license key again. Safe to run twice - use that to retry if the platform step timed out.</div>
+    <div class="msg" id="unrevokeMsg"></div>
+  </div>
+
+  <div class="card">
     <div class="card-title"><span class="emoji">⏳</span> Extend a license</div>
     <label for="extendCode">Activated code (renewal payment on an already-activated key)</label>
     <input id="extendCode" placeholder="the activated code to extend">
@@ -873,6 +882,30 @@ async function revokeKey() {
     }
   } catch (e) {
     showMsg('revokeMsg', 'Could not reach the license server: ' + e, false);
+  }
+}
+
+async function unrevokeLicense() {
+  const deviceId = document.getElementById('unrevokeDevice').value.trim();
+  if (!deviceId) return showMsg('unrevokeMsg', 'Enter the device ID.', false);
+  const btn = document.querySelector('#unrevokeDevice ~ button');
+  btn.disabled = true;
+  showMsg('unrevokeMsg', 'Restoring - this can take up to a minute if the platform server is waking up…', true);
+  try {
+    const res = await fetch(serverUrl() + '?action=unrevoke', {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: deviceId }),
+    });
+    const data = await res.json();
+    // Green only when the whole job is done: the license is not revoked AND the
+    // platform did not object. A half-restored device looks fixed and is not.
+    const fullyOk = data.success === true && !data.expired && (data.license_restored || data.platform_restored);
+    showMsg('unrevokeMsg', data.message || 'Could not unrevoke.', fullyOk);
+  } catch (e) {
+    showMsg('unrevokeMsg', 'Could not reach the license server: ' + e, false);
+  } finally {
+    btn.disabled = false;
   }
 }
 
