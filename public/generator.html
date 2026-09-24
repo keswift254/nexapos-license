@@ -396,27 +396,33 @@ let publishedShas = {
   patchApplierSha256: null,
 };
 
-// github.io/downloads/, not GitHub Releases - Releases was tried for
-// real (1.0.34) on the theory that Pages' git-backed storage was the
-// slow part, and it made things worse, not better: the installed app's
-// own updater (a native HTTP client, not a browser - CORS never
-// applied to it) downloaded the Releases-hosted installer far slower
-// than every previous Pages-hosted update, confirmed by the person
-// actually watching it happen. Releases also broke this page's own
-// "Fetch & verify files" outright (release-assets.githubusercontent.com,
-// the Azure Blob host Release downloads redirect to, sends no
-// Access-Control-Allow-Origin at all). Whatever's actually slow about
-// Pages for a multi-ten-megabyte file, Releases isn't the fix - keep
-// committing setup EXEs/APKs under publish-site/downloads/.
+// Big downloads live on Cloudflare, NOT GitHub. Measured 2026-09-24 from
+// the operator's Kenyan network: GitHub Pages (a Fastly edge in the UAE)
+// managed ~2-4 KB/s per connection - a 19 MB installer took over an hour -
+// while Cloudflare gave ~4 MB/s for the same files. GitHub Releases was
+// tried earlier (1.0.34) and was worse, and also sends no CORS header, which
+// breaks this page's own "Fetch & verify files". Both hosts below send
+// Access-Control-Allow-Origin: * (Workers via publish-downloads/_headers,
+// R2 via the bucket's CORS policy), which the URL-exists check and
+// "Fetch & verify" need, because they are browser fetches.
+//   - DOWNLOADS_HOST: Cloudflare Workers static assets, fed by the private
+//     repo keswift254/nexapos-downloads (push to main = deploy). Each file
+//     must stay under 25 MiB: Windows installers, patch bundles, the patch
+//     applier.
+//   - APK_HOST: Cloudflare R2 bucket nexapos-apk (public r2.dev URL); the
+//     APK is over the 25 MiB limit. Uploaded by hand in the R2 dashboard.
+const DOWNLOADS_HOST = 'https://nexapos-downloads.condojuniur.workers.dev';
+const APK_HOST = 'https://pub-2a7877d5b6bf40a18da4c1d6ed977081.r2.dev';
+
 function setSuggestedDownloadUrls(version) {
   document.getElementById('publishWindowsInstallerUrl').value =
-    `https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Setup-${version}.exe`;
+    `${DOWNLOADS_HOST}/NexaPOS-Setup-${version}.exe`;
   document.getElementById('publishAndroidUrl').value =
-    `https://keswift254.github.io/nexapos-site/downloads/NexaPOS-${version}.apk`;
+    `${APK_HOST}/NexaPOS-${version}.apk`;
 }
 
 function suggestedLegacyUrl(version) {
-  return `https://keswift254.github.io/nexapos-site/downloads/NexaPOS-Setup-Windows7-8-${version}.exe`;
+  return `${DOWNLOADS_HOST}/NexaPOS-Setup-Windows7-8-${version}.exe`;
 }
 
 function includeLegacy() {
