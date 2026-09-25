@@ -28,6 +28,8 @@
     --success-text: #166534;
     --err-soft: #fee2e2;
     --err-text: #991b1b;
+    --warn-soft: #fef3c7;
+    --warn-text: #92400e;
     --shadow: 0 1px 2px rgba(15,23,42,0.04), 0 10px 24px -12px rgba(15,23,42,0.12);
   }
   @media (prefers-color-scheme: dark) {
@@ -51,6 +53,8 @@
       --success-text: #86efac;
       --err-soft: rgba(248,113,113,0.16);
       --err-text: #fca5a5;
+      --warn-soft: rgba(245,158,11,0.16);
+      --warn-text: #fcd34d;
       --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 10px 24px -12px rgba(0,0,0,0.5);
     }
   }
@@ -165,6 +169,19 @@
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
   @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
   .progress-text { font-size: 12px; color: var(--muted); margin: -8px 0 14px; min-height: 15px; }
+  .list-title { font-size: 11.5px; font-weight: 700; color: var(--muted); margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .list { display: grid; gap: 8px; }
+  .item { border: 1px solid var(--field-border); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5; }
+  .item .top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+  .item .mono { font-family: "SF Mono", Consolas, monospace; font-weight: 700; word-break: break-all; }
+  .item .dim { color: var(--muted); word-break: break-word; }
+  .chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+  .chip.ok { background: var(--success-soft); color: var(--success-text); }
+  .chip.warn { background: var(--warn-soft); color: var(--warn-text); }
+  .chip.bad { background: var(--err-soft); color: var(--err-text); }
+  .chip.mute { background: var(--accent-soft); color: var(--accent); }
+  button.small { width: auto; padding: 5px 12px; font-size: 12px; border-radius: 8px; }
+  .empty { color: var(--muted); font-size: 12.5px; }
 </style>
 </head>
 <body>
@@ -235,6 +252,33 @@
     <input id="extendDays" type="number" min="1" placeholder="e.g. 30">
     <button onclick="extendLicense()">Extend</button>
     <div class="msg" id="extendMsg"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="emoji">🔎</span> Find a customer <span class="hint">reinstalled? start here</span></div>
+    <label for="findQuery">Email they paid with, their device ID, or a license code</label>
+    <input id="findQuery" placeholder="e.g. mary@example.com" onkeydown="if (event.key === 'Enter') findCustomer()">
+    <button id="findBtn" onclick="findCustomer()">Find</button>
+    <div class="msg" id="findMsg"></div>
+    <div id="findResult"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="emoji">📲</span> Move a license to a new device</div>
+    <label for="moveFrom">License code, or the device ID it is on now</label>
+    <input id="moveFrom" placeholder="the license code (or the old device ID)">
+    <label for="moveTo">New device ID (the customer reads it off their activation screen)</label>
+    <input id="moveTo" placeholder="the new device ID">
+    <button id="moveBtn" onclick="moveLicense()">Move license</button>
+    <div class="hint" style="margin-top:10px">Keeps the end date. Everything the old device held moves with it, and the old device stops being licensed the next time it checks in. Afterwards the customer opens NexaPOS on the new device and enters their key (or taps Restore). This does not bring back their shop data - that comes from a backup.</div>
+    <div class="msg" id="moveMsg"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span class="emoji">💳</span> Purchases <span class="hint">paid in the app</span></div>
+    <button id="purchasesBtn" class="secondary" onclick="loadPurchases()">Show recent purchases</button>
+    <div class="msg" id="purchasesMsg"></div>
+    <div id="purchasesResult"></div>
   </div>
 
   <div class="card">
@@ -934,6 +978,172 @@ async function extendLicense() {
     }
   } catch (e) {
     showMsg('extendMsg', 'Could not reach the license server: ' + e, false);
+  }
+}
+
+// ---- Customers and purchases -------------------------------------------------
+// Everything below builds its rows with textContent, never innerHTML: emails and
+// device IDs are typed into the app by whoever installs it, so they are not
+// trusted, and this page is where the admin secret lives.
+function node(tag, className, text) {
+  const n = document.createElement(tag);
+  if (className) n.className = className;
+  if (text !== undefined && text !== null) n.textContent = String(text);
+  return n;
+}
+function chip(kind, text) { return node('span', 'chip ' + kind, text); }
+function utc(s) { return s ? String(s).slice(0, 16) + ' UTC' : '-'; }
+function isPast(s) { return !!s && new Date(String(s).replace(' ', 'T') + 'Z').getTime() < Date.now(); }
+function listTitle(text) { return node('div', 'list-title', text); }
+
+async function adminCall(action, body) {
+  const options = { headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' } };
+  if (body) { options.method = 'POST'; options.body = JSON.stringify(body); }
+  const res = await fetch(serverUrl() + '?action=' + action, options);
+  return res.json();
+}
+
+function licenseStatusChip(l) {
+  if (l.revoked) return chip('bad', 'Revoked');
+  if (!l.device_id) return chip('mute', 'Not used yet');
+  if (l.valid_until && isPast(l.valid_until)) return chip('warn', 'Expired');
+  return chip('ok', 'Active');
+}
+function purchaseStatusChip(p) {
+  switch (p.status) {
+    case 'issued': return chip('ok', 'Issued');
+    case 'paid': return chip('warn', 'Paid - not collected yet');
+    case 'failed': return chip('bad', 'Failed');
+    default: return chip('mute', 'Waiting for payment');
+  }
+}
+function purchaseItem(p) {
+  const item = node('div', 'item');
+  const top = node('div', 'top');
+  top.append(node('span', null, `KSh ${p.amount_kes} - ${p.months} months`), purchaseStatusChip(p));
+  item.append(top);
+  item.append(node('div', 'dim', `${p.email} - ${utc(p.paid_at || p.created_at)}`));
+  item.append(node('div', 'dim', `Device: ${p.device_id}`));
+  if (p.license_code) item.append(node('div', 'dim', `License: ${p.license_code}`));
+  return item;
+}
+
+function renderFind(data) {
+  const out = document.getElementById('findResult');
+  out.replaceChildren();
+  if (data.lead) {
+    out.append(listTitle('Registered on the website'));
+    const item = node('div', 'item');
+    item.append(node('div', null, data.lead.name || '-'));
+    item.append(node('div', 'dim', [data.lead.business_name, data.lead.phone, data.lead.email].filter(Boolean).join(' - ')));
+    const leadList = node('div', 'list');
+    leadList.append(item);
+    out.append(leadList);
+  }
+  out.append(listTitle('Licenses'));
+  const licenses = node('div', 'list');
+  if (!data.licenses.length) licenses.append(node('div', 'empty', 'No license found.'));
+  for (const l of data.licenses) {
+    const item = node('div', 'item');
+    const top = node('div', 'top');
+    top.append(node('span', 'mono', l.code), licenseStatusChip(l));
+    item.append(top);
+    item.append(node('div', 'dim', l.device_id ? `On device: ${l.device_id}` : 'Not on any device yet'));
+    item.append(node('div', 'dim', l.valid_until ? `Valid until ${utc(l.valid_until)}` : (l.device_id ? 'Never expires' : '')));
+    if (l.device_id && !l.revoked) {
+      const move = node('button', 'small secondary', 'Move to a new device...');
+      move.style.marginTop = '8px';
+      move.onclick = () => {
+        document.getElementById('moveFrom').value = l.code;
+        document.getElementById('moveTo').focus();
+        document.getElementById('moveTo').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      };
+      item.append(move);
+    }
+    licenses.append(item);
+  }
+  out.append(licenses);
+  out.append(listTitle('Payments made in the app'));
+  const purchases = node('div', 'list');
+  if (!data.purchases.length) purchases.append(node('div', 'empty', 'None.'));
+  for (const p of data.purchases) purchases.append(purchaseItem(p));
+  out.append(purchases);
+  if (data.transfers.length) {
+    out.append(listTitle('Moves between devices'));
+    const moves = node('div', 'list');
+    for (const t of data.transfers) {
+      const item = node('div', 'item');
+      item.append(node('div', 'mono', t.code));
+      item.append(node('div', 'dim', `${t.from_device_id || '-'}  ->  ${t.to_device_id}`));
+      item.append(node('div', 'dim', `${utc(t.created_at)} - by ${t.moved_by === 'admin' ? 'you' : 'the customer'}`));
+      moves.append(item);
+    }
+    out.append(moves);
+  }
+}
+
+async function findCustomer() {
+  const query = document.getElementById('findQuery').value.trim();
+  document.getElementById('findMsg').className = 'msg';
+  document.getElementById('findResult').replaceChildren();
+  if (!query) return showMsg('findMsg', 'Enter an email, a device ID or a license code.', false);
+  const btn = document.getElementById('findBtn');
+  btn.disabled = true;
+  try {
+    const data = await adminCall('find_license', { query });
+    if (!data.success) return showMsg('findMsg', data.message || 'Could not look that up.', false);
+    renderFind(data);
+  } catch (e) {
+    showMsg('findMsg', 'Could not reach the license server: ' + e, false);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function moveLicense() {
+  const from = document.getElementById('moveFrom').value.trim();
+  const to = document.getElementById('moveTo').value.trim();
+  document.getElementById('moveMsg').className = 'msg';
+  if (!from || !to) return showMsg('moveMsg', 'Enter the license code (or old device ID) and the new device ID.', false);
+  if (!confirm(`Move the license on "${from}" to the device "${to}"?\n\nThe old device stops being licensed.`)) return;
+  const btn = document.getElementById('moveBtn');
+  btn.disabled = true;
+  try {
+    // A license code is 10 characters from an alphabet with no dashes; a device ID
+    // is longer. Anything else is treated as the device it is on now.
+    const looksLikeCode = /^[A-Za-z0-9]{10}$/.test(from);
+    const data = await adminCall('transfer_license', looksLikeCode
+      ? { code: from, new_device_id: to }
+      : { from_device_id: from, new_device_id: to });
+    if (!data.success) return showMsg('moveMsg', data.message || 'Could not move it.', false);
+    showMsg('moveMsg', `${data.message} Moved: ${(data.moved_codes || []).join(', ')}. Valid until ${data.valid_until ? utc(data.valid_until) : 'no end date'}.`, !data.expired);
+  } catch (e) {
+    showMsg('moveMsg', 'Could not reach the license server: ' + e, false);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadPurchases() {
+  const out = document.getElementById('purchasesResult');
+  out.replaceChildren();
+  document.getElementById('purchasesMsg').className = 'msg';
+  const btn = document.getElementById('purchasesBtn');
+  btn.disabled = true;
+  try {
+    const data = await adminCall('list_purchases');
+    if (!data.success) return showMsg('purchasesMsg', data.message || 'Could not load purchases.', false);
+    const shown = data.purchases;
+    const waiting = data.purchases.filter((p) => p.status === 'paid').length;
+    if (waiting) showMsg('purchasesMsg', `${waiting} payment${waiting === 1 ? ' is' : 's are'} paid but not collected yet - the customer's app has not asked for the license. Usually they reinstalled or closed the app: use Find a customer.`, false);
+    const list = node('div', 'list');
+    if (!shown.length) list.append(node('div', 'empty', 'Nothing bought yet.'));
+    for (const p of shown) list.append(purchaseItem(p));
+    out.append(list);
+  } catch (e) {
+    showMsg('purchasesMsg', 'Could not reach the license server: ' + e, false);
+  } finally {
+    btn.disabled = false;
   }
 }
 

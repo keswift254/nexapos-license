@@ -343,7 +343,7 @@ final class Recovery
                 if ($update->rowCount() !== 1) {
                     continue;
                 }
-                $this->pdo->prepare('INSERT INTO license_transfers (code, from_device_id, to_device_id, moved_by, ip_address) VALUES (?, ?, ?, ?, ?)')
+                $this->pdo->prepare('INSERT INTO license_transfers (code, from_device_id, to_device_id, moved_by, ip_address, created_at) VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP())')
                     ->execute([$code, $fromDevice, $toDevice, $by, $ip !== '' ? $ip : null]);
                 $moved[] = (string) $code;
             }
