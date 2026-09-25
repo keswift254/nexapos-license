@@ -256,6 +256,31 @@ final class Purchases
         return [['success' => true], 200];
     }
 
+    /**
+     * Hands over every payment made with [email] that was paid for but never
+     * collected (the customer paid, then lost or reinstalled the app before it
+     * asked for its license), to [deviceId]. Only ever called once the customer
+     * has proved they own the email (see Recovery). Returns how many licenses
+     * were issued.
+     */
+    public function claimPaidFor(string $email, string $deviceId): int
+    {
+        Database::ensurePurchaseTable();
+        $find = $this->pdo->prepare("SELECT id FROM license_purchases WHERE email = ? AND status = 'paid' ORDER BY id ASC");
+        $find->execute([$email]);
+        $claimed = 0;
+        foreach ($find->fetchAll(PDO::FETCH_COLUMN) as $id) {
+            $this->pdo->prepare("UPDATE license_purchases SET device_id = ? WHERE id = ? AND status = 'paid'")->execute([$deviceId, $id]);
+            try {
+                $this->issue((int) $id);
+                $claimed++;
+            } catch (\Throwable $e) {
+                error_log('[nexapos_license] Could not issue a claimed purchase (' . $id . '): ' . $e->getMessage());
+            }
+        }
+        return $claimed;
+    }
+
     /** For the vendor (admin): what has been bought, most recent first - to reconcile paid-but-never-claimed payments. */
     public function recent(): array
     {

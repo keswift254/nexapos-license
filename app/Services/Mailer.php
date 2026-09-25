@@ -19,12 +19,15 @@ class Mailer
     private string $apiKey;
     private string $fromEmail;
     private string $fromName;
+    private string $baseUrl;
 
     public function __construct(array $config)
     {
         $this->apiKey = (string) $config['brevo_api_key'];
         $this->fromEmail = (string) $config['mail_from'];
         $this->fromName = (string) ($config['mail_from_name'] ?? 'NexaPOS');
+        // Only ever changed to point the tests at a fake.
+        $this->baseUrl = rtrim((string) ($config['brevo_base_url'] ?? 'https://api.brevo.com'), '/');
     }
 
     /**
@@ -48,7 +51,7 @@ class Mailer
             $payload['htmlContent'] = $htmlBody;
         }
 
-        $ch = curl_init('https://api.brevo.com/v3/smtp/email');
+        $ch = curl_init($this->baseUrl . '/v3/smtp/email');
         curl_setopt_array($ch, [
             CURLOPT_HTTPHEADER => [
                 'api-key: ' . $this->apiKey,

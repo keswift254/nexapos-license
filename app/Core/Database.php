@@ -106,6 +106,55 @@ class Database
     }
 
     private static bool $purchaseTableChecked = false;
+    private static bool $recoveryTablesChecked = false;
+
+    /**
+     * The tables behind moving a license to a new device: a log of every move,
+     * and the short-lived codes emailed to a customer who asks to restore. Same
+     * "ask once, leave a note" idea as ensurePurchaseTable.
+     */
+    public static function ensureRecoveryTables(): void
+    {
+        if (self::$recoveryTablesChecked || !self::$connection) {
+            return;
+        }
+        $note = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'nexapos_license_recovery_tables_' . sha1(self::$databaseKey);
+        $noteTime = @filemtime($note);
+        if ($noteTime !== false && (time() - $noteTime) < self::CHECK_NOTE_TTL_SECONDS) {
+            self::$recoveryTablesChecked = true;
+            return;
+        }
+        self::$connection->exec(
+            'CREATE TABLE IF NOT EXISTS license_transfers (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                code VARCHAR(20) NOT NULL,
+                from_device_id VARCHAR(64) NULL,
+                to_device_id VARCHAR(64) NOT NULL,
+                moved_by VARCHAR(10) NOT NULL,
+                ip_address VARCHAR(45) NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX (code, created_at)
+            )'
+        );
+        self::$connection->exec(
+            'CREATE TABLE IF NOT EXISTS license_restore_codes (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                email VARCHAR(190) NOT NULL,
+                device_id VARCHAR(64) NOT NULL,
+                code_hash CHAR(64) NOT NULL,
+                attempts INT NOT NULL DEFAULT 0,
+                used TINYINT(1) NOT NULL DEFAULT 0,
+                ip_address VARCHAR(45) NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX (email, created_at),
+                INDEX (device_id, created_at),
+                INDEX (ip_address, created_at)
+            )'
+        );
+        self::$recoveryTablesChecked = true;
+        @file_put_contents($note, gmdate('c'));
+    }
 
     /**
      * Creates the license_purchases table if this database does not have it yet

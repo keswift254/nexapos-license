@@ -19,6 +19,7 @@ use License\Core\SupportRecovery;
 use License\Services\Mailer;
 use License\Services\Paystack;
 use License\Services\Purchases;
+use License\Services\Recovery;
 
 function jsonResponse(array $payload, int $status = 200): void
 {
@@ -59,8 +60,8 @@ function welcomeEmailHtml(string $name): string
     $steps = [
         'Download the app for your device',
         "Install it and open it - you'll land on an activation screen",
-        'Message us to arrange payment',
-        "We'll send your license key - enter it once, no internet needed after that",
+        'Choose a plan and pay in the app - card or M-Pesa, and it activates by itself',
+        "Prefer to pay another way? Message us and we'll send you a license key to enter",
     ];
     $stepsHtml = '';
     foreach ($steps as $i => $step) {
@@ -256,8 +257,9 @@ if ($action === 'register_lead' && $method === 'POST') {
                 "Next steps:\n" .
                 "1. Download the app for your device: https://keswift254.github.io/nexapos-site/#get-started\n" .
                 "2. Install it and open it - you'll land on an activation screen.\n" .
-                "3. Reply to this email or message us on WhatsApp to arrange payment: https://wa.me/message/M5SGWZ664XJ4C1\n" .
-                "4. We'll generate your license key and send it over - enter it once, and the app runs fully offline after that, no internet needed.\n\n" .
+                "3. Choose a plan on that screen and pay in the app with card or M-Pesa - it activates by itself, and the app runs fully offline after that.\n" .
+                "4. Prefer to pay another way? Reply to this email or message us on WhatsApp and we'll send you a license key to enter: https://wa.me/message/M5SGWZ664XJ4C1\n\n" .
+                "Reinstalled the app or changed phone? Tap \"Restore my purchase\" on the activation screen and use the email you paid with.\n\n" .
                 "Questions? Just reply to this email or message us on WhatsApp.\n\n" .
                 '- The NexaPOS team',
             welcomeEmailHtml($name)
@@ -1007,6 +1009,39 @@ if ($action === 'payment_done' && $method === 'GET') {
 if ($action === 'list_purchases' && $method === 'GET') {
     requireAdmin($licenseConfig);
     jsonResponse(['success' => true, 'purchases' => purchasesService($pdo, $licenseConfig)->recent()]);
+}
+
+/**
+ * Getting a license onto a new device after a reinstall (see app/Services/Recovery.php).
+ * restore_start / restore_confirm are the customer's own (proved by an emailed
+ * code); find_license / transfer_license are the vendor's, behind the admin secret.
+ */
+function recoveryService(PDO $pdo, array $licenseConfig): Recovery
+{
+    return new Recovery($pdo, $licenseConfig, purchasesService($pdo, $licenseConfig));
+}
+
+if ($action === 'restore_start' && $method === 'POST') {
+    [$payload, $status] = recoveryService($pdo, $licenseConfig)->restoreStart(requestBody(), callerIp());
+    jsonResponse($payload, $status);
+}
+
+if ($action === 'restore_confirm' && $method === 'POST') {
+    [$payload, $status] = recoveryService($pdo, $licenseConfig)->restoreConfirm(requestBody(), callerIp());
+    jsonResponse($payload, $status);
+}
+
+if ($action === 'find_license' && ($method === 'POST' || $method === 'GET')) {
+    requireAdmin($licenseConfig);
+    $query = (string) ($method === 'POST' ? (requestBody()['query'] ?? '') : ($_GET['query'] ?? ''));
+    [$payload, $status] = recoveryService($pdo, $licenseConfig)->find($query);
+    jsonResponse($payload, $status);
+}
+
+if ($action === 'transfer_license' && $method === 'POST') {
+    requireAdmin($licenseConfig);
+    [$payload, $status] = recoveryService($pdo, $licenseConfig)->transfer(requestBody(), callerIp());
+    jsonResponse($payload, $status);
 }
 
 jsonResponse(['success' => false, 'message' => 'Unknown action.'], 404);

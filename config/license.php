@@ -51,6 +51,7 @@ $config = [
     // The app polls for its payment every few seconds; Paystack is asked at most
     // this often per purchase. (An override exists only so the tests need not wait.)
     'purchase_verify_every_seconds' => (int) (getenv('PURCHASE_VERIFY_EVERY_SECONDS') !== false ? getenv('PURCHASE_VERIFY_EVERY_SECONDS') : 2),
+    'brevo_base_url' => getenv('BREVO_BASE_URL') ?: 'https://api.brevo.com',
     // What is for sale. The SERVER decides prices and lengths: the app only
     // displays what it is told, and the amount charged is always the one stored
     // here, never one the app sends. `months` are calendar months from the moment

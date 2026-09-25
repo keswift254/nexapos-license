@@ -1,6 +1,10 @@
 <?php
-// A stand-in for api.paystack.co, for the license server's tests ONLY. Nothing here
-// talks to the real Paystack. State lives in a JSON file next to the temp dir.
+// A stand-in for api.paystack.co AND api.brevo.com (email), for the license server's
+// tests ONLY. Nothing here talks to the real services. State lives in a JSON file
+// next to the temp dir.
+//   POST /v3/smtp/email               (api-key header)            -> records the mail
+//   GET  /_test/mail?to=              -> the last mail sent to that address ({} if none)
+//   GET  /_test/mail_count?to=        -> how many mails were sent to that address
 //   POST /transaction/initialize      (Bearer sk_test_fake_key)  -> checkout URL
 //   GET  /transaction/verify/{ref}                                -> current state
 //   POST /_test/set     {reference,status,amount?,currency?}      -> "customer paid" etc.
@@ -8,13 +12,33 @@
 //   POST /_test/mode    {fail_initialize?:bool, verify_500?:bool}
 $stateFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'fake_paystack_state_' . ($_SERVER['SERVER_PORT'] ?? '0') . '.json';
 $state = is_file($stateFile) ? (json_decode((string) file_get_contents($stateFile), true) ?: []) : [];
-$state += ['tx' => [], 'mode' => ['fail_initialize' => false, 'verify_500' => false], 'verify_calls' => 0];
+$state += ['tx' => [], 'mode' => ['fail_initialize' => false, 'verify_500' => false, 'mail_500' => false], 'verify_calls' => 0, 'mail' => []];
 $save = function () use (&$state, $stateFile) { file_put_contents($stateFile, json_encode($state)); };
 $path = parse_url((string) $_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $method = $_SERVER['REQUEST_METHOD'];
 $body = json_decode((string) file_get_contents('php://input'), true) ?: [];
 header('Content-Type: application/json');
-$out = function (array $payload, int $status = 200) { http_response_code($status); echo json_encode($payload); exit; };
+$out = function ($payload, int $status = 200) { http_response_code($status); echo json_encode($payload); exit; };
+
+if ($path === '/v3/smtp/email' && $method === 'POST') {
+    if (($_SERVER['HTTP_API_KEY'] ?? '') === '') {
+        $out(['message' => 'Key not found'], 401);
+    }
+    if (!empty($state['mode']['mail_500'])) {
+        $out(['message' => 'Mail outage'], 500);
+    }
+    $to = (string) ($body['to'][0]['email'] ?? '');
+    $state['mail'][$to][] = ['subject' => (string) ($body['subject'] ?? ''), 'text' => (string) ($body['textContent'] ?? ''), 'html' => (string) ($body['htmlContent'] ?? '')];
+    $save();
+    $out(['messageId' => 'fake'], 201);
+}
+if ($path === '/_test/mail' && $method === 'GET') {
+    $list = $state['mail'][(string) ($_GET['to'] ?? '')] ?? [];
+    $out($list === [] ? new stdClass() : end($list));
+}
+if ($path === '/_test/mail_count' && $method === 'GET') {
+    $out(['count' => count($state['mail'][(string) ($_GET['to'] ?? '')] ?? [])]);
+}
 
 $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
 if (str_starts_with($path, '/transaction/') && $auth !== 'Bearer sk_test_fake_key') {

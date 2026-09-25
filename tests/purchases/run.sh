@@ -1,8 +1,9 @@
 #!/bin/bash
 # Run:  bash tests/purchases/run.sh      (needs the local XAMPP MySQL + PHP, see MYSQL/PHP below)
-# End-to-end test of the license server's "buy a license" flow (Purchases.php) against:
+# End-to-end test of the license server's "buy a license" flow (Purchases.php) and of
+# moving a license to a new device (Recovery.php) against:
 #   * a THROWAWAY local MySQL database (never production),
-#   * a FAKE Paystack (fake_paystack.php - nothing here contacts the real Paystack),
+#   * a FAKE Paystack + FAKE email service (fake_paystack.php - nothing here contacts the real ones),
 #   * local PHP servers on spare ports.
 MYSQL=/c/xampp/mysql/bin/mysql.exe
 PHP=/c/xampp/php/php.exe
@@ -53,7 +54,7 @@ start_license() { # port extra-env...
   env DB_NAME="$DB" LICENSE_ADMIN_SECRET="$SECRET" PAYSTACK_BASE_URL="$FP" LICENSE_PUBLIC_BASE_URL="http://127.0.0.1:$LI_PORT/index.php" "$@" \
     "$PHP" -S 127.0.0.1:$port -t "$LIC/public" >/tmp/li_$port.log 2>&1 &
 }
-start_license $LI_PORT PAYSTACK_SECRET_KEY=$KEY PAYSTACK_SUBACCOUNT=ACCT_fake123 PURCHASE_VERIFY_EVERY_SECONDS=0
+start_license $LI_PORT PAYSTACK_SECRET_KEY=$KEY PAYSTACK_SUBACCOUNT=ACCT_fake123 PURCHASE_VERIFY_EVERY_SECONDS=0 BREVO_API_KEY=fake-brevo-key MAIL_FROM=noreply@nexapos.test BREVO_BASE_URL="$FP"
 # ... one WITHOUT a Paystack key (payments not configured yet)
 start_license $OFF_PORT
 # ... and one with a long verify throttle
@@ -261,6 +262,183 @@ check_not "list_purchases: no raw cents field" "$r" "amount_minor"
 page=$(curl -s "$LI?action=payment_done&reference=x")
 check "payment_done: a human page" "$page" "Back to NexaPOS"
 check_not "payment_done: does not claim the payment succeeded" "$page" "Payment successful"
+
+# ======================================================================================
+# Getting a license onto a new device (Recovery.php): the customer's emailed-code route
+# and the vendor's find/transfer tools. The fake Brevo in fake_paystack.php catches mail.
+# ======================================================================================
+adm() { curl -s -X POST "$LI?action=$1" -H "X-Admin-Secret: $SECRET" -H "Content-Type: application/json" -H "CF-Connecting-IP: $TEST_IP" -d "$2"; }
+mail_last() { curl -s -G "$FP/_test/mail" --data-urlencode "to=$1"; }
+mail_count() { jget "$(curl -s -G "$FP/_test/mail_count" --data-urlencode "to=$1")" count; }
+mail_code() { jget "$(mail_last "$1")" text | grep -o 'code is: [0-9]*' | grep -o '[0-9]*'; }   # the 6 digits in the last mail to $1
+not_this() { if [ "$1" = "111111" ]; then echo 222222; else echo 111111; fi; }              # a code that is certainly wrong
+restore() { # device email  -> asks for a code, returns the 6 digits from the mail
+  post restore_start "{\"device_id\":\"$1\",\"email\":\"$2\"}" >/dev/null; mail_code "$2"
+}
+
+section "restore: a customer who reinstalled gets the license back (email code)"
+TOKEN1=$(jget "$(post activate "{\"code\":\"$CODE\",\"device_id\":\"$DEV\"}")" activation_token)
+TOKEN2=$(jget "$(post activate "{\"code\":\"$CODE2\",\"device_id\":\"$DEV\"}")" activation_token)
+UNTIL2=$(sql "SELECT valid_until FROM $DB.license_keys WHERE code='$CODE2';")
+check "before: both licenses are valid on the old device" "$(jget "$(curl -s -X POST "$LI?action=verify" -H "Authorization: Bearer $TOKEN2")" valid)" "true"
+NEW1="dev-reinstalled-$TS"
+r=$(post restore_start "{\"device_id\":\"$NEW1\",\"email\":\"nobody@nowhere.example\"}")
+check "restore_start: an email that never bought gets the same answer as one that did" "$r" '"success":true'
+check "restore_start: ...saying only that a code is sent IF there was a purchase" "$r" "If a NexaPOS purchase was made with this email"
+check "restore_start: ...but no email goes to someone who never bought" "$(mail_count nobody@nowhere.example)" "0"
+r=$(post restore_start "{\"device_id\":\"$NEW1\",\"email\":\"Buyer@Example.com\"}")
+check "restore_start: the real customer gets the same answer" "$r" "If a NexaPOS purchase was made with this email"
+RC=$(mail_code buyer@example.com)
+check "restore_start: a 6-digit code is emailed to the purchase address" "${#RC}" "6"
+check "restore_start: the email's subject carries the code too" "$(jget "$(mail_last buyer@example.com)" subject)" "$RC"
+check "restore_start: an HTML version of the email is sent" "$(jget "$(mail_last buyer@example.com)" html)" "Your restore code"
+check "restore_start: the database holds a hash, not the code" "$(sql "SELECT COUNT(*) FROM $DB.license_restore_codes WHERE code_hash='$RC';")" "0"
+check "restore_start: ...a 64-character hash" "$(sql "SELECT LENGTH(code_hash) FROM $DB.license_restore_codes WHERE email='buyer@example.com' ORDER BY id DESC LIMIT 1;")" "64"
+r=$(post restore_confirm "{\"device_id\":\"$NEW1\",\"email\":\"buyer@example.com\",\"code\":\"$(not_this "$RC")\"}")
+check "restore_confirm: a wrong code is refused" "$r" "not right"
+check_not "restore_confirm: ...and nothing is handed out" "$r" '"code"'
+check "restore_confirm: ...and nothing moved" "$(sql "SELECT COUNT(*) FROM $DB.license_keys WHERE device_id='$NEW1';")" "0"
+r=$(post restore_confirm "{\"device_id\":\"$NEW1\",\"email\":\"buyer@example.com\",\"code\":\"12\"}")
+check "restore_confirm: a code that is not 6 digits is refused" "$r" "6-digit code"
+r=$(post restore_confirm "{\"device_id\":\"$NEW1\",\"email\":\"buyer@example.com\",\"code\":\"$RC\"}")
+check "restore_confirm: the right code succeeds" "$r" '"success":true'
+check "restore_confirm: the answer is the license that runs longest" "$(jget "$r" code)" "$CODE2"
+check "restore_confirm: both licenses of the stack moved" "$(jget "$r" moved)" "2"
+check "DB: both licenses are now on the new device" "$(sql "SELECT COUNT(*) FROM $DB.license_keys WHERE device_id='$NEW1' AND code IN ('$CODE','$CODE2');")" "2"
+check "DB: nothing is left on the old device" "$(sql "SELECT COUNT(*) FROM $DB.license_keys WHERE device_id='$DEV';")" "0"
+check "DB: the end date did not change" "$(sql "SELECT valid_until FROM $DB.license_keys WHERE code='$CODE2';")" "$UNTIL2"
+check "DB: the old tokens were dropped" "$(sql "SELECT COUNT(*) FROM $DB.license_keys WHERE code IN ('$CODE','$CODE2') AND activation_token_hash IS NOT NULL;")" "0"
+check "the old device's tokens no longer verify (license 1)" "$(jget "$(curl -s -X POST "$LI?action=verify" -H "Authorization: Bearer $TOKEN1")" valid)" "false"
+check "the old device's tokens no longer verify (license 2)" "$(jget "$(curl -s -X POST "$LI?action=verify" -H "Authorization: Bearer $TOKEN2")" valid)" "false"
+check "the move is logged as the customer's own" "$(sql "SELECT COUNT(*) FROM $DB.license_transfers WHERE code IN ('$CODE','$CODE2') AND moved_by='self' AND to_device_id='$NEW1' AND from_device_id='$DEV';")" "2"
+act=$(post activate "{\"code\":\"$CODE2\",\"device_id\":\"$NEW1\"}")
+check "the new device activates the restored license the ordinary way" "$act" '"success":true'
+check "...with the same end date as before" "$(jget "$act" valid_until)" "$UNTIL2"
+check "...and its new token verifies" "$(jget "$(curl -s -X POST "$LI?action=verify" -H "Authorization: Bearer $(jget "$act" activation_token)")" valid)" "true"
+check "the old device can no longer activate it" "$(post activate "{\"code\":\"$CODE2\",\"device_id\":\"$DEV\"}")" "belongs to another device"
+r=$(post restore_confirm "{\"device_id\":\"$NEW1\",\"email\":\"buyer@example.com\",\"code\":\"$RC\"}")
+check "a code works once only" "$r" "not right"
+
+section "restore: a code that is guessed at is burned after 5 tries"
+LOCK="dev-lock-$TS"
+RC=$(restore "$LOCK" g@g.co)
+for i in 1 2 3 4 5; do r=$(post restore_confirm "{\"device_id\":\"$LOCK\",\"email\":\"g@g.co\",\"code\":\"$(not_this "$RC")\"}"); done
+check "5 wrong codes: each just 'not right'" "$r" "not right"
+r=$(post restore_confirm "{\"device_id\":\"$LOCK\",\"email\":\"g@g.co\",\"code\":\"$RC\"}")
+check "the 6th try is refused even with the right code" "$r" "Too many wrong codes"
+check "...and the license stayed where it was" "$(sql "SELECT COUNT(*) FROM $DB.license_keys WHERE device_id='$LOCK';")" "0"
+RC=$(restore "$LOCK" g@g.co)
+check "...asking again gives a fresh code" "$(jget "$(post restore_confirm "{\"device_id\":\"$LOCK\",\"email\":\"g@g.co\",\"code\":\"$RC\"}")" success)" "true"
+check "...which works, and takes the license" "$(sql "SELECT COUNT(*) FROM $DB.license_keys WHERE device_id='$LOCK';")" "1"
+
+section "restore: the code belongs to the device that asked, and to the email it was sent to"
+RC=$(restore "dev-asker-$TS" h@h.co)
+r=$(post restore_confirm "{\"device_id\":\"dev-thief-$TS\",\"email\":\"h@h.co\",\"code\":\"$RC\"}")
+check "another device cannot use the code" "$r" "not right"
+r=$(post restore_confirm "{\"device_id\":\"dev-asker-$TS\",\"email\":\"buyer@example.com\",\"code\":\"$RC\"}")
+check "the code does not unlock a different email's license" "$r" "not right"
+check "the license is still on its device" "$(sql "SELECT device_id FROM $DB.license_keys WHERE code=(SELECT license_code FROM $DB.license_purchases WHERE email='h@h.co' AND status='issued' LIMIT 1);")" "dev-hook-$TS"
+check "...and no code was spent by those attempts on the real device" "$(jget "$(post restore_confirm "{\"device_id\":\"dev-asker-$TS\",\"email\":\"h@h.co\",\"code\":\"$RC\"}")" success)" "true"
+
+section "restore: paid for but never collected"
+DEVC="dev-claim-old-$TS"; NEWC="dev-claim-new-$TS"
+r=$(post checkout_start "{\"device_id\":\"$DEVC\",\"plan_id\":\"m3\",\"email\":\"claim@c.co\"}"); REFC=$(jget "$r" reference)
+BODYC="{\"event\":\"charge.success\",\"data\":{\"reference\":\"$REFC\",\"status\":\"success\",\"amount\":150000,\"currency\":\"KES\"}}"
+curl -s -o /dev/null -X POST "$LI?action=paystack_webhook" -H "x-paystack-signature: $(hmac "$BODYC" "$KEY")" --data-binary "$BODYC"
+check "setup: the payment is 'paid' (webhook) but the app never collected the license" "$(sql "SELECT status FROM $DB.license_purchases WHERE reference='$REFC';")" "paid"
+RC=$(restore "$NEWC" claim@c.co)
+check "a code is emailed to someone whose payment is still waiting" "${#RC}" "6"
+r=$(post restore_confirm "{\"device_id\":\"$NEWC\",\"email\":\"claim@c.co\",\"code\":\"$RC\"}")
+check "the waiting payment is issued to the new device" "$r" '"success":true'
+check "...one payment claimed" "$(jget "$r" claimed)" "1"
+check "DB: a license exists on the new device" "$(sql "SELECT COUNT(*) FROM $DB.license_keys WHERE device_id='$NEWC';")" "1"
+check "DB: the purchase is issued, and now belongs to the new device" "$(sql "SELECT CONCAT(status,'|',device_id) FROM $DB.license_purchases WHERE reference='$REFC';")" "issued|$NEWC"
+check "...and it activates" "$(jget "$(post activate "{\"code\":\"$(jget "$r" code)\",\"device_id\":\"$NEWC\"}")" success)" "true"
+
+section "restore: nothing to restore / expired"
+DEVX="dev-race-$TS"
+sql "UPDATE $DB.license_keys SET valid_until = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY) WHERE device_id='$DEVX';"
+NEWX="dev-expired-new-$TS"
+RC=$(restore "$NEWX" r@r.co)
+r=$(post restore_confirm "{\"device_id\":\"$NEWX\",\"email\":\"r@r.co\",\"code\":\"$RC\"}")
+check "an expired license is not restored - the customer is pointed at renewing" "$r" "No active license"
+check "...and it stayed put" "$(sql "SELECT COUNT(*) FROM $DB.license_keys WHERE device_id='$DEVX';")" "1"
+
+section "restore: a license cannot be passed around without limit"
+LOCKED=$(sql "SELECT code FROM $DB.license_keys WHERE device_id='$LOCK' LIMIT 1;")
+for i in 1 2; do sql "INSERT INTO $DB.license_transfers (code, from_device_id, to_device_id, moved_by) VALUES ('$LOCKED', 'a$i', 'b$i', 'self');"; done
+RC=$(restore "dev-limit-new-$TS" g@g.co)
+r=$(post restore_confirm "{\"device_id\":\"dev-limit-new-$TS\",\"email\":\"g@g.co\",\"code\":\"$RC\"}")
+check "after 3 self-service moves in 90 days a 4th is refused, and support is named" "$r" "Contact NexaPOS"
+check "...the license did not move" "$(sql "SELECT device_id FROM $DB.license_keys WHERE code='$LOCKED';")" "$LOCK"
+
+section "restore: the email could not be sent"
+fake mode '{"mail_500":true}'
+r=$(post restore_start "{\"device_id\":\"dev-mailfail-$TS\",\"email\":\"h@h.co\"}")
+check "a mail outage is reported honestly (not 'a code is on its way')" "$r" "could not be emailed"
+fake mode '{"mail_500":false}'
+
+section "restore: validation and rate limits"
+r=$(post restore_start '{"email":"a@b.co"}');                                   check "no device -> rejected" "$r" "device_id is required"
+r=$(post restore_start "{\"device_id\":\"d-v-$TS\",\"email\":\"not-an-email\"}"); check "bad email -> rejected" "$r" "email address you paid with"
+for i in 1 2 3; do post restore_start "{\"device_id\":\"dev-rl-$i-$TS\",\"email\":\"rate@r.co\"}" >/dev/null; done
+r=$(post restore_start "{\"device_id\":\"dev-rl-4-$TS\",\"email\":\"rate@r.co\"}")
+check "the 4th code request in an hour for one email is refused" "$r" "Too many attempts"
+section "restore: rate limit per device"
+for i in 1 2 3 4 5; do post restore_start "{\"device_id\":\"dev-rld-$TS\",\"email\":\"rld$i@r.co\"}" >/dev/null; done
+r=$(post restore_start "{\"device_id\":\"dev-rld-$TS\",\"email\":\"rld6@r.co\"}")
+check "the 6th code request in an hour from one device is refused" "$r" "Too many attempts"
+section "restore: rate limit per address"
+for i in $(seq 1 10); do post restore_start "{\"device_id\":\"dev-rli-$i-$TS\",\"email\":\"rli$i@r.co\"}" >/dev/null; done
+r=$(post restore_start "{\"device_id\":\"dev-rli-11-$TS\",\"email\":\"rli11@r.co\"}")
+check "the 11th code request in an hour from one address is refused" "$r" "Too many attempts"
+
+section "vendor: find a customer"
+r=$(curl -s -X POST "$LI?action=find_license" -H "Content-Type: application/json" -d '{"query":"buyer@example.com"}')
+check "find_license: needs the admin secret" "$r" "Invalid or missing admin secret"
+r=$(adm find_license '{"query":"Buyer@Example.com"}')
+check "find by email: finds the licenses bought with it" "$r" "$CODE2"
+check "find by email: ...and the purchases" "$r" "$REF8"
+check "find by email: ...and where they are now (the new device)" "$r" "$NEW1"
+check "find by email: ...and the history of moves" "$r" "\"moved_by\":\"self\""
+check_not "find by email: no internal payment URLs leak into the vendor view" "$r" "authorization_url"
+r=$(adm find_license "{\"query\":\"$NEW1\"}")
+check "find by device ID: finds its licenses" "$r" "$CODE2"
+r=$(adm find_license "{\"query\":\"$(echo "$CODE2" | tr 'A-Z' 'a-z')\"}")
+check "find by license code (any case): finds it" "$r" "\"code\":\"$CODE2\""
+check "find by code: says whether a token is held" "$r" '"has_token":true'
+r=$(adm find_license '{"query":"nothing-matches-this"}')
+check "find: an unknown query is a clean empty answer" "$r" '"licenses":[]'
+r=$(adm find_license '{"query":""}');  check "find: an empty query is refused" "$r" "Enter an email"
+
+section "vendor: move a license to a new device"
+r=$(curl -s -X POST "$LI?action=transfer_license" -H "Content-Type: application/json" -d "{\"code\":\"$CODE2\",\"new_device_id\":\"x\"}")
+check "transfer_license: needs the admin secret" "$r" "Invalid or missing admin secret"
+ADM1="dev-vendor-moved-$TS"
+r=$(adm transfer_license "{\"code\":\"$CODE2\"}");                         check "no new device ID -> refused" "$r" "new device ID"
+r=$(adm transfer_license "{\"new_device_id\":\"$ADM1\"}");                 check "no license named -> refused" "$r" "either the license code"
+r=$(adm transfer_license "{\"code\":\"NOSUCHCODE\",\"new_device_id\":\"$ADM1\"}"); check "unknown license -> refused" "$r" "No such license"
+r=$(adm transfer_license "{\"code\":\"$CODE2\",\"new_device_id\":\"$NEW1\"}"); check "moving to the device it is already on -> refused" "$r" "already on this device"
+r=$(adm transfer_license "{\"from_device_id\":\"$NEW1\",\"new_device_id\":\"$ADM1\"}")
+check "moving by the OLD device ID works" "$r" '"success":true'
+check "...and reports which licenses moved" "$r" "$CODE2"
+check "...and that the end date was kept" "$(jget "$r" valid_until)" "$UNTIL2"
+check "DB: the whole stack is now on the new device" "$(sql "SELECT COUNT(*) FROM $DB.license_keys WHERE device_id='$ADM1' AND code IN ('$CODE','$CODE2');")" "2"
+check "DB: logged as the vendor's move" "$(sql "SELECT COUNT(*) FROM $DB.license_transfers WHERE moved_by='admin' AND to_device_id='$ADM1';")" "2"
+act=$(post activate "{\"code\":\"$CODE2\",\"device_id\":\"$ADM1\"}")
+check "the customer then enters the key on the new device and it activates" "$act" '"success":true'
+sql "UPDATE $DB.license_keys SET valid_until = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY) WHERE code='$CODE';"
+ADM2="dev-vendor-moved-2-$TS"
+r=$(adm transfer_license "{\"code\":\"$CODE\",\"new_device_id\":\"$ADM2\"}")
+check "moving an expired license works but says to extend it first" "$(jget "$r" expired)" "true"
+check "...with a message to that effect" "$r" "extend it"
+# a revoked license, and one nobody has used yet
+sql "UPDATE $DB.license_keys SET revoked = 1 WHERE code='$CODE2';"
+r=$(adm transfer_license "{\"code\":\"$CODE2\",\"new_device_id\":\"dev-x-$TS\"}")
+check "a revoked license is not moved" "$r" "revoked"
+issued=$(adm issue '{"license_duration_days":30}'); FRESH=$(jget "$issued" code)
+r=$(adm transfer_license "{\"code\":\"$FRESH\",\"new_device_id\":\"dev-y-$TS\"}")
+check "a key nobody has used yet is not 'moved' - the customer just enters it" "$r" "has not been used on any device yet"
 
 section "nothing else broke"
 issue=$(curl -s -X POST "$LI?action=issue" -H "X-Admin-Secret: $SECRET" -H "Content-Type: application/json" -d '{"license_duration_days":30}')

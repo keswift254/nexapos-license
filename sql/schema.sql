@@ -67,6 +67,36 @@ CREATE TABLE IF NOT EXISTS license_purchases (
     INDEX (status, created_at)
 );
 
+-- Moving a license to a new device (a reinstall gives the app a new device ID).
+-- license_transfers logs every move (by 'self' = the customer proving they own the
+-- purchase email, or 'admin'); license_restore_codes holds the short-lived 6-digit
+-- codes emailed for that proof (only a hash of the code is stored).
+CREATE TABLE IF NOT EXISTS license_transfers (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(20) NOT NULL,
+    from_device_id VARCHAR(64) NULL,
+    to_device_id VARCHAR(64) NOT NULL,
+    moved_by VARCHAR(10) NOT NULL,
+    ip_address VARCHAR(45) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX (code, created_at)
+);
+
+CREATE TABLE IF NOT EXISTS license_restore_codes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(190) NOT NULL,
+    device_id VARCHAR(64) NOT NULL,
+    code_hash CHAR(64) NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    used TINYINT(1) NOT NULL DEFAULT 0,
+    ip_address VARCHAR(45) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX (email, created_at),
+    INDEX (device_id, created_at),
+    INDEX (ip_address, created_at)
+);
+
 -- Registrations from the marketing/download site - a lead, not a
 -- customer yet. Purchase + key issuance still happen manually (the
 -- vendor runs the key generator after payment clears, see
