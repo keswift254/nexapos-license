@@ -747,6 +747,28 @@ async function hashBothPublishFiles() {
       showMsg('hashMsg', 'Could not fetch/hash one or more files - check the field(s) above for details (GitHub Releases URLs need the SHA-256 pasted in manually; see the placeholder text).', false);
       return;
     }
+    // The optional patch files and the patch applier: the same button hashes
+    // every one that has a URL (a blank one is simply not part of this release).
+    // Until now they were hashed only when their own URL field was edited, so a
+    // click here skipped them and their SHA-256 boxes stayed empty or stale.
+    const failedPatchFiles = [];
+    let patchFilesChecked = 0;
+    if (includePatches()) {
+      for (const [platform, urlId, label] of PATCH_PUBLISH_FILES) {
+        if (!document.getElementById(urlId).value.trim()) continue;
+        patchFilesChecked++;
+        if (!await hashPublishFile(platform)) failedPatchFiles.push(label);
+      }
+    }
+    if (failedPatchFiles.length) {
+      updatePublishButtonState();
+      showMsg(
+        'hashMsg',
+        `Could not fetch/hash: ${failedPatchFiles.join(', ')} - check the field(s) above for details. The installers themselves verified fine.`,
+        false,
+      );
+      return;
+    }
     const staleWindowsInstaller = publishedShas.windowsInstaller && windowsInstallerSha === publishedShas.windowsInstaller;
     const staleAndroid = publishedShas.android && androidSha === publishedShas.android;
     const staleLegacy = includeLegacy() && publishedShas.windowsLegacy && legacySha === publishedShas.windowsLegacy;
@@ -766,11 +788,26 @@ async function hashBothPublishFiles() {
       publishBtn.disabled = true;
       return;
     }
-    showMsg('hashMsg', 'Every file verified and is genuinely different from the currently-published version.', true);
+    showMsg(
+      'hashMsg',
+      patchFilesChecked
+        ? `Every file verified (installers plus ${patchFilesChecked} patch file${patchFilesChecked === 1 ? '' : 's'}/applier) and the installers are genuinely different from the currently-published version.`
+        : 'Every file verified and is genuinely different from the currently-published version.',
+      true,
+    );
   } finally {
     btn.disabled = false;
   }
 }
+
+// The optional delta-update files, in the order they are fetched: [key given to
+// hashPublishFile, id of its URL box, name used in messages].
+const PATCH_PUBLISH_FILES = [
+  ['androidPatch', 'publishAndroidPatchUrl', 'Android patch'],
+  ['windowsInstallerPatch', 'publishWindowsInstallerPatchUrl', 'Windows patch'],
+  ['windowsLegacyPatch', 'publishWindowsLegacyPatchUrl', 'Windows 7/8 patch'],
+  ['patchApplier', 'publishPatchApplierUrl', 'patch applier'],
+];
 
 function serverUrl() {
   return document.getElementById('serverUrl').value.trim();
