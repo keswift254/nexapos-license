@@ -14,7 +14,7 @@ SECRET=scratch-admin-secret-not-real
 KEY=sk_test_fake_key
 TS=$(date +%s)
 DB="nexapos_purch_$TS"
-FP_PORT=8981; LI_PORT=8982; OFF_PORT=8983; SLOW_PORT=8984
+FP_PORT=8981; LI_PORT=8982; OFF_PORT=8983; SLOW_PORT=8984; NOTEST_PORT=8985; OLD_PORT=8986
 FP="http://127.0.0.1:$FP_PORT"
 LI="http://127.0.0.1:$LI_PORT/index.php"
 OFF="http://127.0.0.1:$OFF_PORT/index.php"
@@ -38,12 +38,13 @@ fake() { curl -s -X POST "$FP/_test/$1" -H "Content-Type: application/json" -d "
 hmac() { "$PHP" -r 'echo hash_hmac("sha512", $argv[1], $argv[2]);' "$1" "$2"; }
 
 cleanup() {
-  kill_port $FP_PORT; kill_port $LI_PORT; kill_port $OFF_PORT; kill_port $SLOW_PORT
+  kill_port $FP_PORT; kill_port $LI_PORT; kill_port $OFF_PORT; kill_port $SLOW_PORT; kill_port $NOTEST_PORT; kill_port $OLD_PORT
   sql "DROP DATABASE IF EXISTS $DB;"
+  sql "DROP DATABASE IF EXISTS ${DB}_old;"
   rm -f "$(cygpath -u "$TEMP" 2>/dev/null || echo /tmp)"/fake_paystack_state_*.json 2>/dev/null
 }
 trap cleanup EXIT
-for p in $FP_PORT $LI_PORT $OFF_PORT $SLOW_PORT; do kill_port $p; done
+for p in $FP_PORT $LI_PORT $OFF_PORT $SLOW_PORT $NOTEST_PORT $OLD_PORT; do kill_port $p; done
 sleep 1
 
 # The fake Paystack
@@ -66,9 +67,9 @@ r=$(curl -s "$LI?action=plans")
 check "plans: succeeds" "$r" '"success":true'
 check "plans: payments enabled" "$(jget "$r" purchasing_enabled)" "true"
 check "plans: KES" "$(jget "$r" currency)" "KES"
-check "plans: 3 months 1500" "$r" '{"id":"m3","label":"3 months","months":3,"amount_kes":1500}'
-check "plans: 6 months 3000" "$r" '{"id":"m6","label":"6 months","months":6,"amount_kes":3000}'
-check "plans: 1 year 4800" "$r" '{"id":"m12","label":"1 year","months":12,"amount_kes":4800}'
+check "plans: 3 months 1500" "$r" '{"id":"m3","label":"3 months","months":3,"days":0,"amount_kes":1500,"test":false}'
+check "plans: 6 months 3000" "$r" '{"id":"m6","label":"6 months","months":6,"days":0,"amount_kes":3000,"test":false}'
+check "plans: 1 year 4800" "$r" '{"id":"m12","label":"1 year","months":12,"days":0,"amount_kes":4800,"test":false}'
 check_not "plans: never mentions a trial" "$r" "trial"
 r=$(curl -s "$OFF?action=plans")
 check "plans: with no Paystack key, payments are reported as not available" "$(jget "$r" purchasing_enabled)" "false"
@@ -262,6 +263,106 @@ check_not "list_purchases: no raw cents field" "$r" "amount_minor"
 page=$(curl -s "$LI?action=payment_done&reference=x")
 check "payment_done: a human page" "$page" "Back to NexaPOS"
 check_not "payment_done: does not claim the payment succeeded" "$page" "Payment successful"
+
+# ======================================================================================
+# The temporary KSh 5 test plan: a one-day plan (`days`, not `months`) marked `test`,
+# for trying the whole payment flow with real money. Hidden by TEST_PLAN_ENABLED=0.
+# ======================================================================================
+section "the KSh 5 test plan"
+r=$(curl -s "$LI?action=plans")
+check "test plan: listed, marked as a test, one day, KSh 5" "$r" '{"id":"test","label":"Test plan","months":0,"days":1,"amount_kes":5,"test":true}'
+check "test plan: the real plans are not marked as tests" "$r" '"amount_kes":1500,"test":false}'
+DEVT="dev-testplan-$TS"
+r=$(post checkout_start "{\"device_id\":\"$DEVT\",\"plan_id\":\"test\",\"email\":\"tester@example.com\",\"amount_kes\":500,\"days\":400}")
+check "test plan: start succeeds (an app-sent amount/days is ignored, as for every plan)" "$r" '"success":true'
+REFT=$(jget "$r" reference)
+check "test plan: the plan echoed back is the test plan, one day" "$(jget "$r" plan.days)" "1"
+check "test plan: ...and marked as a test" "$(jget "$r" plan.test)" "true"
+p=$(curl -s "$FP/_test/payload?reference=$REFT")
+check "test plan: Paystack was asked for KSh 5 = 500 cents" "$(jget "$p" amount)" "500"
+check "test plan: ...in KES" "$(jget "$p" currency)" "KES"
+check "DB row: test, 0 months, 1 day, 500 cents" "$(sql "SELECT CONCAT(plan_id,'|',months,'|',days,'|',amount_minor) FROM $DB.license_purchases WHERE reference='$REFT';")" "test|0|1|500"
+fake set "{\"reference\":\"$REFT\",\"status\":\"success\"}"
+r=$(post checkout_status "{\"reference\":\"$REFT\",\"device_id\":\"$DEVT\"}")
+check "test plan: issued once Paystack confirms" "$(jget "$r" status)" "issued"
+CODET=$(jget "$r" code)
+hours=$(sql "SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), valid_until) FROM $DB.license_keys WHERE code='$CODET';")
+if [ "$hours" -ge 22 ] && [ "$hours" -le 24 ]; then check "test plan: the license lasts about one day ($hours h)" ok ok; else check "test plan: about one day" "$hours h" "22-24 h"; fi
+check "test plan: valid_days is 1" "$(sql "SELECT valid_days FROM $DB.license_keys WHERE code='$CODET';")" "1"
+check "test plan: bound to the paying device" "$(sql "SELECT device_id FROM $DB.license_keys WHERE code='$CODET';")" "$DEVT"
+check "test plan: it activates like any license" "$(post activate "{\"code\":\"$CODET\",\"device_id\":\"$DEVT\"}")" '"success":true'
+r=$(curl -s "$LI?action=list_purchases" -H "X-Admin-Secret: $SECRET")
+check "test plan: the vendor's purchases list shows the days" "$r" '"plan_id":"test","months":0,"days":1'
+
+section "the test plan stacks one day on a running license (and not more than that)"
+DEVK="dev-stack-$TS"
+r=$(post checkout_start "{\"device_id\":\"$DEVK\",\"plan_id\":\"m3\",\"email\":\"stack@example.com\"}"); REFK1=$(jget "$r" reference)
+fake set "{\"reference\":\"$REFK1\",\"status\":\"success\"}"
+CODEK1=$(jget "$(post checkout_status "{\"reference\":\"$REFK1\",\"device_id\":\"$DEVK\"}")" code)
+r=$(post checkout_start "{\"device_id\":\"$DEVK\",\"plan_id\":\"test\",\"email\":\"stack@example.com\"}"); REFK2=$(jget "$r" reference)
+fake set "{\"reference\":\"$REFK2\",\"status\":\"success\"}"
+CODEK2=$(jget "$(post checkout_status "{\"reference\":\"$REFK2\",\"device_id\":\"$DEVK\"}")" code)
+check "stacking: the test day starts when the paid 3 months end" "$(sql "SELECT b.valid_until = DATE_ADD(a.valid_until, INTERVAL 1 DAY) FROM $DB.license_keys a, $DB.license_keys b WHERE a.code='$CODEK1' AND b.code='$CODEK2';")" "1"
+
+section "the test plan can be paid for only a few times per device"
+DEVC="dev-testcap-$TS"
+for i in 1 2 3; do
+  r=$(post checkout_start "{\"device_id\":\"$DEVC\",\"plan_id\":\"test\",\"email\":\"cap$i@example.com\"}"); R=$(jget "$r" reference)
+  fake set "{\"reference\":\"$R\",\"status\":\"success\"}"
+  post checkout_status "{\"reference\":\"$R\",\"device_id\":\"$DEVC\"}" >/dev/null
+done
+check "cap: three paid test purchases are in" "$(sql "SELECT COUNT(*) FROM $DB.license_purchases WHERE device_id='$DEVC' AND plan_id='test' AND status='issued';")" "3"
+r=$(post checkout_start "{\"device_id\":\"$DEVC\",\"plan_id\":\"test\",\"email\":\"cap4@example.com\"}")
+check "cap: a 4th test purchase on the same device is refused, in words" "$r" "already been used on this device"
+check "cap: ...and nothing was created" "$(sql "SELECT COUNT(*) FROM $DB.license_purchases WHERE device_id='$DEVC' AND plan_id='test';")" "3"
+r=$(post checkout_start "{\"device_id\":\"$DEVC\",\"plan_id\":\"m3\",\"email\":\"cap4@example.com\"}")
+check "cap: the real plans are not affected by it" "$(jget "$r" success)" "true"
+DEVU="dev-testcap-unpaid-$TS"
+for i in 1 2 3 4; do
+  post checkout_start "{\"device_id\":\"$DEVU\",\"plan_id\":\"test\",\"email\":\"unpaid$i@example.com\"}" >/dev/null
+done
+check "cap: unpaid/abandoned attempts do not count against it" "$(sql "SELECT COUNT(*) FROM $DB.license_purchases WHERE device_id='$DEVU' AND plan_id='test';")" "4"
+
+section "switching the test plan off (TEST_PLAN_ENABLED=0)"
+start_license $NOTEST_PORT PAYSTACK_SECRET_KEY=$KEY PURCHASE_VERIFY_EVERY_SECONDS=0 TEST_PLAN_ENABLED=0
+sleep 2
+NOTEST="http://127.0.0.1:$NOTEST_PORT/index.php"
+r=$(curl -s "$NOTEST?action=plans")
+check_not "off: the test plan is no longer listed" "$r" '"id":"test"'
+check "off: the real plans still are" "$r" '"amount_kes":3000'
+r=$(curl -s -X POST "$NOTEST?action=checkout_start" -H "Content-Type: application/json" -H "CF-Connecting-IP: $TEST_IP" -d "{\"device_id\":\"dev-off-$TS\",\"plan_id\":\"test\",\"email\":\"o@o.co\"}")
+check "off: it cannot be started any more" "$r" "Choose one of the listed plans"
+# someone who paid for it just before it was switched off still gets their day
+DEVP="dev-paid-before-off-$TS"
+r=$(post checkout_start "{\"device_id\":\"$DEVP\",\"plan_id\":\"test\",\"email\":\"before@example.com\"}"); REFP=$(jget "$r" reference)
+fake set "{\"reference\":\"$REFP\",\"status\":\"success\"}"
+r=$(curl -s -X POST "$NOTEST?action=checkout_status" -H "Content-Type: application/json" -d "{\"reference\":\"$REFP\",\"device_id\":\"$DEVP\"}")
+check "off: a test payment made earlier is still honoured" "$(jget "$r" status)" "issued"
+
+section "an already-deployed purchases table (no days column) is upgraded, and its old rows still work"
+OLDDB="${DB}_old"
+env DB_NAME="$OLDDB" LICENSE_ADMIN_SECRET="$SECRET" PAYSTACK_BASE_URL="$FP" PAYSTACK_SECRET_KEY=$KEY PURCHASE_VERIFY_EVERY_SECONDS=0 \
+  "$PHP" -S 127.0.0.1:$OLD_PORT -t "$LIC/public" >/tmp/li_$OLD_PORT.log 2>&1 &
+sleep 2
+OLD="http://127.0.0.1:$OLD_PORT/index.php"
+curl -s "$OLD?action=health" >/dev/null   # bootstraps the database and its tables
+sql "DROP TABLE $OLDDB.license_purchases;
+CREATE TABLE $OLDDB.license_purchases (
+    id INT AUTO_INCREMENT PRIMARY KEY, reference VARCHAR(64) NOT NULL UNIQUE, device_id VARCHAR(64) NOT NULL,
+    plan_id VARCHAR(20) NOT NULL, months INT NOT NULL, amount_minor INT NOT NULL, currency CHAR(3) NOT NULL DEFAULT 'KES',
+    email VARCHAR(190) NOT NULL, status VARCHAR(12) NOT NULL DEFAULT 'pending', paystack_status VARCHAR(40) NULL,
+    authorization_url VARCHAR(500) NULL, license_code VARCHAR(20) NULL, ip_address VARCHAR(45) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, last_checked_at TIMESTAMP NULL, paid_at TIMESTAMP NULL, issued_at TIMESTAMP NULL);
+INSERT INTO $OLDDB.license_purchases (reference, device_id, plan_id, months, amount_minor, email, status, paid_at)
+VALUES ('nxl-old-row', 'dev-old-$TS', 'm3', 3, 150000, 'old@example.com', 'paid', UTC_TIMESTAMP());"
+check "migration: before, the table has no days column" "$(sql "SHOW COLUMNS FROM $OLDDB.license_purchases LIKE 'days';" | wc -l | tr -d ' ')" "0"
+r=$(curl -s -X POST "$OLD?action=checkout_status" -H "Content-Type: application/json" -d "{\"reference\":\"nxl-old-row\",\"device_id\":\"dev-old-$TS\"}")
+check "migration: a purchase made before the column existed is still issued" "$(jget "$r" status)" "issued"
+check "migration: the table now has the days column" "$(sql "SHOW COLUMNS FROM $OLDDB.license_purchases LIKE 'days';" | wc -l | tr -d ' ')" "1"
+d=$(sql "SELECT TIMESTAMPDIFF(DAY, UTC_TIMESTAMP(), valid_until) FROM $OLDDB.license_keys WHERE device_id='dev-old-$TS';")
+if [ "$d" -ge 89 ] && [ "$d" -le 92 ]; then check "migration: ...for its 3 months ($d days), the extra days defaulting to 0" ok ok; else check "migration: 3 months" "$d days" "89-92"; fi
+r=$(curl -s -X POST "$OLD?action=checkout_start" -H "Content-Type: application/json" -H "CF-Connecting-IP: $TEST_IP" -d "{\"device_id\":\"dev-old-2-$TS\",\"plan_id\":\"test\",\"email\":\"n@n.co\"}")
+check "migration: and the upgraded table can start a test purchase" "$(jget "$r" success)" "true"
 
 # ======================================================================================
 # Getting a license onto a new device (Recovery.php): the customer's emailed-code route

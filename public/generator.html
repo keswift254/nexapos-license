@@ -1101,10 +1101,17 @@ function purchaseStatusChip(p) {
     default: return chip('mute', 'Waiting for payment');
   }
 }
+// How long a plan lasts, in words: months and/or days (the test plan is one day).
+function planLength(p) {
+  const parts = [];
+  if (p.months > 0) parts.push(`${p.months} month${p.months === 1 ? '' : 's'}`);
+  if (p.days > 0) parts.push(`${p.days} day${p.days === 1 ? '' : 's'}`);
+  return parts.join(' + ') || '-';
+}
 function purchaseItem(p) {
   const item = node('div', 'item');
   const top = node('div', 'top');
-  top.append(node('span', null, `KSh ${p.amount_kes} - ${p.months} months`), purchaseStatusChip(p));
+  top.append(node('span', null, `KSh ${p.amount_kes} - ${planLength(p)}${p.plan_id === 'test' ? ' (test plan)' : ''}`), purchaseStatusChip(p));
   item.append(top);
   item.append(node('div', 'dim', `${p.email} - ${utc(p.paid_at || p.created_at)}`));
   item.append(node('div', 'dim', `Device: ${p.device_id}`));

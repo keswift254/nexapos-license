@@ -55,12 +55,23 @@ $config = [
     // What is for sale. The SERVER decides prices and lengths: the app only
     // displays what it is told, and the amount charged is always the one stored
     // here, never one the app sends. `months` are calendar months from the moment
-    // the customer receives the license. amount_kes is whole Kenya shillings.
+    // the customer receives the license; `days` (optional, for short plans) are added
+    // on top. amount_kes is whole Kenya shillings.
     'plans' => [
         ['id' => 'm3', 'label' => '3 months', 'months' => 3, 'amount_kes' => 1500],
         ['id' => 'm6', 'label' => '6 months', 'months' => 6, 'amount_kes' => 3000],
         ['id' => 'm12', 'label' => '1 year', 'months' => 12, 'amount_kes' => 4800],
+        // A TEMPORARY KSh 5 plan for trying the whole payment flow with real money
+        // (Paystack, the webhook, activation). `days` instead of `months` (one day of
+        // license), and `test` marks it so the app shows it as a test and keeps it out
+        // of the "best value" comparison. An app that predates it drops it (it needs
+        // `months` of at least 1), so today's customers never see it. When the test is
+        // done, delete this line - or set TEST_PLAN_ENABLED=0 in the hosting dashboard
+        // to hide it at once. Anyone who has already paid for it still gets their day.
+        ['id' => 'test', 'label' => 'Test plan', 'months' => 0, 'days' => 1, 'amount_kes' => 5, 'test' => true],
     ],
+    // The switch for the test plan above: on unless the environment says 0/false/off/no.
+    'test_plan_enabled' => !in_array(strtolower((string) getenv('TEST_PLAN_ENABLED')), ['0', 'false', 'off', 'no'], true),
 ];
 
 $localConfig = __DIR__ . '/license.local.php';

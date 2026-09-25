@@ -168,7 +168,8 @@ class Database
         if (self::$purchaseTableChecked || !self::$connection) {
             return;
         }
-        $note = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'nexapos_license_purchases_table_' . sha1(self::$databaseKey);
+        // "_v2": the table gained a `days` column; an older note must not skip the check.
+        $note = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'nexapos_license_purchases_table_v2_' . sha1(self::$databaseKey);
         $noteTime = @filemtime($note);
         if ($noteTime !== false && (time() - $noteTime) < self::CHECK_NOTE_TTL_SECONDS) {
             self::$purchaseTableChecked = true;
@@ -181,6 +182,7 @@ class Database
                 device_id VARCHAR(64) NOT NULL,
                 plan_id VARCHAR(20) NOT NULL,
                 months INT NOT NULL,
+                days INT NOT NULL DEFAULT 0,
                 amount_minor INT NOT NULL,
                 currency CHAR(3) NOT NULL DEFAULT \'KES\',
                 email VARCHAR(190) NOT NULL,
@@ -198,6 +200,17 @@ class Database
                 INDEX (status, created_at)
             )'
         );
+        // An already-deployed table predates `days` (short plans, e.g. the test plan).
+        $hasDays = self::$connection->query("SHOW COLUMNS FROM license_purchases LIKE 'days'")->fetchColumn();
+        if (!$hasDays) {
+            try {
+                self::$connection->exec('ALTER TABLE license_purchases ADD COLUMN days INT NOT NULL DEFAULT 0 AFTER months');
+            } catch (PDOException $exception) {
+                if (($exception->errorInfo[1] ?? null) !== 1060) { // 1060 = another request added it first
+                    throw $exception;
+                }
+            }
+        }
         self::$purchaseTableChecked = true;
         @file_put_contents($note, gmdate('c'));
     }

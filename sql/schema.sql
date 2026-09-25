@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS license_purchases (
     device_id VARCHAR(64) NOT NULL,
     plan_id VARCHAR(20) NOT NULL,
     months INT NOT NULL,
+    days INT NOT NULL DEFAULT 0,
     amount_minor INT NOT NULL,
     currency CHAR(3) NOT NULL DEFAULT 'KES',
     email VARCHAR(190) NOT NULL,
