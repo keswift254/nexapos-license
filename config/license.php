@@ -33,6 +33,33 @@ $config = [
     // harmlessly (see revoke()'s try/catch) rather than breaking the
     // license revoke itself.
     'platform_base_url' => getenv('NEXAPOS_PLATFORM_BASE_URL') ?: 'https://nexapos-platform.onrender.com/index.php',
+
+    // --- Selling licenses from the activation screen (app/Services/Purchases.php) ---
+    // The vendor's OWN Paystack account. The secret key is set in the hosting
+    // dashboard's environment only - never in a file in this repo, never pasted in
+    // chat. Without it the plans are still listed but cannot be paid for, so the
+    // app can ship before the account is ready.
+    'paystack_secret_key' => getenv('PAYSTACK_SECRET_KEY') ?: '',
+    // Where the money settles: the Paystack subaccount code (ACCT_...). Not a
+    // secret, but the vendor's to provide. Empty = settles to the main account.
+    'paystack_subaccount' => getenv('PAYSTACK_SUBACCOUNT') ?: '',
+    // Only ever changed to point the tests at a fake Paystack.
+    'paystack_base_url' => getenv('PAYSTACK_BASE_URL') ?: 'https://api.paystack.co',
+    // This server's own public address: where Paystack sends the customer's
+    // browser after paying (a "payment received" page), see payment_done.
+    'public_base_url' => getenv('LICENSE_PUBLIC_BASE_URL') ?: 'https://nexapos-license-1.onrender.com/index.php',
+    // The app polls for its payment every few seconds; Paystack is asked at most
+    // this often per purchase. (An override exists only so the tests need not wait.)
+    'purchase_verify_every_seconds' => (int) (getenv('PURCHASE_VERIFY_EVERY_SECONDS') !== false ? getenv('PURCHASE_VERIFY_EVERY_SECONDS') : 2),
+    // What is for sale. The SERVER decides prices and lengths: the app only
+    // displays what it is told, and the amount charged is always the one stored
+    // here, never one the app sends. `months` are calendar months from the moment
+    // the customer receives the license. amount_kes is whole Kenya shillings.
+    'plans' => [
+        ['id' => 'm3', 'label' => '3 months', 'months' => 3, 'amount_kes' => 1500],
+        ['id' => 'm6', 'label' => '6 months', 'months' => 6, 'amount_kes' => 3000],
+        ['id' => 'm12', 'label' => '1 year', 'months' => 12, 'amount_kes' => 4800],
+    ],
 ];
 
 $localConfig = __DIR__ . '/license.local.php';

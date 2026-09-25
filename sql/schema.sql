@@ -33,6 +33,40 @@ CREATE TABLE IF NOT EXISTS license_keys (
     INDEX (device_id)
 );
 
+-- One row per attempt to buy a license from the activation screen. The
+-- SERVER fixes what was ordered (plan, months, amount) when the row is created;
+-- nothing the app sends afterwards can change what is charged or issued.
+--   pending -> the customer has been sent to Paystack, no payment seen yet
+--   paid    -> Paystack confirmed the exact amount in KES (money received)
+--   issued  -> the license was created and handed to the paying device
+--   failed  -> Paystack reported the payment failed / did not match
+-- A row only becomes `issued` when the device that paid comes back for its
+-- license, so the license period starts when the customer actually has it, not
+-- when a webhook happened to fire while their phone was off.
+-- reference is UNIQUE: it is the idempotency key for everything below.
+CREATE TABLE IF NOT EXISTS license_purchases (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    reference VARCHAR(64) NOT NULL UNIQUE,
+    device_id VARCHAR(64) NOT NULL,
+    plan_id VARCHAR(20) NOT NULL,
+    months INT NOT NULL,
+    amount_minor INT NOT NULL,
+    currency CHAR(3) NOT NULL DEFAULT 'KES',
+    email VARCHAR(190) NOT NULL,
+    status VARCHAR(12) NOT NULL DEFAULT 'pending',
+    paystack_status VARCHAR(40) NULL,
+    authorization_url VARCHAR(500) NULL,
+    license_code VARCHAR(20) NULL,
+    ip_address VARCHAR(45) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_checked_at TIMESTAMP NULL,
+    paid_at TIMESTAMP NULL,
+    issued_at TIMESTAMP NULL,
+    INDEX (device_id, created_at),
+    INDEX (ip_address, created_at),
+    INDEX (status, created_at)
+);
+
 -- Registrations from the marketing/download site - a lead, not a
 -- customer yet. Purchase + key issuance still happen manually (the
 -- vendor runs the key generator after payment clears, see

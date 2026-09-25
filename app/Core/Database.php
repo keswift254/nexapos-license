@@ -105,6 +105,54 @@ class Database
         @file_put_contents($note, gmdate('c'));
     }
 
+    private static bool $purchaseTableChecked = false;
+
+    /**
+     * Creates the license_purchases table if this database does not have it yet
+     * (an already-deployed database predates it). Called only by the purchase
+     * actions, not on every request. Same "ask once, leave a note" idea as
+     * ensureAppVersionInstaller: the note says this database was checked, so the
+     * status polling the app does every few seconds does not repeat the question.
+     */
+    public static function ensurePurchaseTable(): void
+    {
+        if (self::$purchaseTableChecked || !self::$connection) {
+            return;
+        }
+        $note = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'nexapos_license_purchases_table_' . sha1(self::$databaseKey);
+        $noteTime = @filemtime($note);
+        if ($noteTime !== false && (time() - $noteTime) < self::CHECK_NOTE_TTL_SECONDS) {
+            self::$purchaseTableChecked = true;
+            return;
+        }
+        self::$connection->exec(
+            'CREATE TABLE IF NOT EXISTS license_purchases (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                reference VARCHAR(64) NOT NULL UNIQUE,
+                device_id VARCHAR(64) NOT NULL,
+                plan_id VARCHAR(20) NOT NULL,
+                months INT NOT NULL,
+                amount_minor INT NOT NULL,
+                currency CHAR(3) NOT NULL DEFAULT \'KES\',
+                email VARCHAR(190) NOT NULL,
+                status VARCHAR(12) NOT NULL DEFAULT \'pending\',
+                paystack_status VARCHAR(40) NULL,
+                authorization_url VARCHAR(500) NULL,
+                license_code VARCHAR(20) NULL,
+                ip_address VARCHAR(45) NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                last_checked_at TIMESTAMP NULL,
+                paid_at TIMESTAMP NULL,
+                issued_at TIMESTAMP NULL,
+                INDEX (device_id, created_at),
+                INDEX (ip_address, created_at),
+                INDEX (status, created_at)
+            )'
+        );
+        self::$purchaseTableChecked = true;
+        @file_put_contents($note, gmdate('c'));
+    }
+
     private static function newPdo(string $dsn, array $db): PDO
     {
         $options = [

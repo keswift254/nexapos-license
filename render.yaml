@@ -37,3 +37,10 @@ services:
         sync: false
       - key: NOTIFY_EMAIL
         value: condojuniur@outlook.com
+      # --- Selling licenses from the activation screen (app/Services/Purchases.php).
+      # Set these in the Render dashboard (sync: false = never in git). Until the
+      # secret key is set, the plans are listed but cannot be paid for. ---
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_SUBACCOUNT
+        sync: false

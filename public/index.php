@@ -17,6 +17,8 @@ use License\Core\Database;
 use License\Core\LicenseCode;
 use License\Core\SupportRecovery;
 use License\Services\Mailer;
+use License\Services\Paystack;
+use License\Services\Purchases;
 
 function jsonResponse(array $payload, int $status = 200): void
 {
@@ -931,6 +933,80 @@ if ($action === 'set_latest_version' && $method === 'POST') {
         jsonResponse(['success' => false, 'message' => 'The database needs the Windows installer migration before this release can be published. Apply sql/migrations/20260906_002_app_version_installer.sql, then try again.'], 503);
     }
     jsonResponse(['success' => true]);
+}
+
+/**
+ * Selling licenses from the activation screen (see app/Services/Purchases.php for
+ * the whole flow and why each step is decided on this side). `plans` is public and
+ * read-only; `checkout_start` and `checkout_status` are called by the app with the
+ * device's own id; `paystack_webhook` is Paystack's, authenticated by its signature;
+ * `list_purchases` is the vendor's, behind the admin secret.
+ */
+function purchasesService(PDO $pdo, array $licenseConfig): Purchases
+{
+    return new Purchases($pdo, $licenseConfig, new Paystack($licenseConfig));
+}
+
+/**
+ * The caller's address, for rate limiting only. Cloudflare fronts the host and
+ * puts the real client address in CF-Connecting-IP; without it (direct access,
+ * local testing) the socket's address is all there is.
+ */
+function callerIp(): string
+{
+    $forwarded = trim(headerValue('CF-Connecting-IP'));
+    if ($forwarded !== '' && filter_var($forwarded, FILTER_VALIDATE_IP) !== false) {
+        return $forwarded;
+    }
+    return trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+}
+
+if ($action === 'plans' && $method === 'GET') {
+    [$payload, $status] = purchasesService($pdo, $licenseConfig)->plans();
+    jsonResponse($payload, $status);
+}
+
+if ($action === 'checkout_start' && $method === 'POST') {
+    [$payload, $status] = purchasesService($pdo, $licenseConfig)->start(requestBody(), callerIp());
+    jsonResponse($payload, $status);
+}
+
+if ($action === 'checkout_status' && ($method === 'POST' || $method === 'GET')) {
+    [$payload, $status] = purchasesService($pdo, $licenseConfig)->status($method === 'POST' ? requestBody() : $_GET);
+    jsonResponse($payload, $status);
+}
+
+if ($action === 'paystack_webhook' && $method === 'POST') {
+    // The raw body, exactly as sent: the signature is over these bytes, not over
+    // whatever json_decode makes of them.
+    [$payload, $status] = purchasesService($pdo, $licenseConfig)->webhook(
+        (string) file_get_contents('php://input'),
+        headerValue('X-Paystack-Signature')
+    );
+    jsonResponse($payload, $status);
+}
+
+// Where Paystack sends the customer's browser after the payment page. A page for
+// a person, not an API answer - and deliberately not claiming success: the app is
+// the one that finds out (it is polling), and a cancelled payment lands here too.
+if ($action === 'payment_done' && $method === 'GET') {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    header('Content-Type: text/html; charset=utf-8');
+    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+        . '<title>NexaPOS</title></head><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f7f7fb;color:#14141f;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;">'
+        . '<div style="max-width:420px;margin:24px;background:#fff;border-radius:12px;padding:32px 24px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.08);">'
+        . '<div style="width:44px;height:44px;background:#4f46e5;border-radius:12px;color:#fff;font-size:20px;font-weight:700;line-height:44px;margin:0 auto 14px;">N</div>'
+        . '<h1 style="font-size:20px;margin:0 0 10px;">Back to NexaPOS</h1>'
+        . '<p style="color:#55556b;font-size:15px;line-height:1.5;margin:0;">If your payment went through, NexaPOS activates itself within a few seconds. You can close this page and return to the app.</p>'
+        . '</div></body></html>';
+    exit;
+}
+
+if ($action === 'list_purchases' && $method === 'GET') {
+    requireAdmin($licenseConfig);
+    jsonResponse(['success' => true, 'purchases' => purchasesService($pdo, $licenseConfig)->recent()]);
 }
 
 jsonResponse(['success' => false, 'message' => 'Unknown action.'], 404);
