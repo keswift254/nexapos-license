@@ -31,7 +31,7 @@ if ($path === '/transaction/initialize' && $method === 'POST') {
     $state['tx'][$ref] = ['payload' => $body, 'status' => 'abandoned', 'amount' => (int) ($body['amount'] ?? 0), 'currency' => (string) ($body['currency'] ?? 'NGN')];
     $save();
     $out(['status' => true, 'message' => 'Authorization URL created', 'data' => [
-        'authorization_url' => 'http://127.0.0.1:' . $_SERVER['SERVER_PORT'] . '/pay/' . $ref, 'access_code' => 'ac_fake', 'reference' => $ref]]);
+        'authorization_url' => (getenv('FAKE_PAYSTACK_HTTPS') ? 'https://checkout.fake.paystack.test' : 'http://127.0.0.1:' . $_SERVER['SERVER_PORT']) . '/pay/' . $ref, 'access_code' => 'ac_fake', 'reference' => $ref]]);
 }
 
 if (str_starts_with($path, '/transaction/verify/') && $method === 'GET') {
