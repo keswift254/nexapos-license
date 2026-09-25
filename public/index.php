@@ -765,6 +765,53 @@ if ($action === 'extend' && $method === 'POST') {
 }
 
 /**
+ * Admin correction tool - replaces an activated license's end date with an
+ * exact instant. Unlike `extend`, this can move the date forwards or backwards
+ * and can give an end date to a previously non-expiring license. That makes it
+ * suitable for fixing an operator mistake, not for recording an ordinary
+ * renewal. The app learns the corrected value on its next verify cycle.
+ */
+if ($action === 'set_expiry' && $method === 'POST') {
+    requireAdmin($licenseConfig);
+    $body = requestBody();
+    $code = strtoupper(trim((string) ($body['code'] ?? '')));
+    $rawExpiry = trim((string) ($body['valid_until'] ?? ''));
+    if ($code === '' || $rawExpiry === '') {
+        jsonResponse(['success' => false, 'message' => 'code and valid_until are required.'], 422);
+    }
+
+    // The generator sends an ISO-8601 instant with a timezone. Requiring the
+    // timezone avoids silently interpreting an operator's local wall clock as
+    // the server's timezone (which may differ on Render or a local install).
+    if (strlen($rawExpiry) > 40 || preg_match('/(?:Z|[+-]\d{2}:\d{2})$/i', $rawExpiry) !== 1) {
+        jsonResponse(['success' => false, 'message' => 'valid_until must be an ISO-8601 date and time with a timezone.'], 422);
+    }
+    try {
+        $expiry = (new DateTimeImmutable($rawExpiry))
+            ->setTimezone(new DateTimeZone('UTC'))
+            ->format('Y-m-d H:i:s');
+    } catch (Throwable $e) {
+        jsonResponse(['success' => false, 'message' => 'Enter a valid expiry date and time.'], 422);
+    }
+
+    $stmt = $pdo->prepare('SELECT activated_at, revoked FROM license_keys WHERE code = ?');
+    $stmt->execute([$code]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        jsonResponse(['success' => false, 'message' => 'No license key with that code.'], 404);
+    }
+    if ($row['activated_at'] === null) {
+        jsonResponse(['success' => false, 'message' => 'This key has not been activated yet - it has no license expiry to change.'], 422);
+    }
+    if ((int) $row['revoked'] === 1) {
+        jsonResponse(['success' => false, 'message' => 'This key has been revoked. Unrevoke it before changing its expiry.'], 422);
+    }
+
+    $pdo->prepare('UPDATE license_keys SET valid_until = ? WHERE code = ?')->execute([$expiry, $code]);
+    jsonResponse(['success' => true, 'valid_until' => $expiry]);
+}
+
+/**
  * Public - the app checks this (piggybacking on its existing periodic
  * sync timer, see nexapos_mobile's UpdateService) to see if a newer
  * build exists. No auth: version metadata isn't sensitive, and every

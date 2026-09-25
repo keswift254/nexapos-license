@@ -432,6 +432,21 @@ ADM2="dev-vendor-moved-2-$TS"
 r=$(adm transfer_license "{\"code\":\"$CODE\",\"new_device_id\":\"$ADM2\"}")
 check "moving an expired license works but says to extend it first" "$(jget "$r" expired)" "true"
 check "...with a message to that effect" "$r" "extend it"
+
+section "admin changes an exact license expiry"
+editable=$(adm issue '{"license_duration_days":30}'); EDITABLE=$(jget "$editable" code)
+post activate "{\"code\":\"$EDITABLE\",\"device_id\":\"dev-expiry-$TS\"}" >/dev/null
+r=$(curl -s -X POST "$LI?action=set_expiry" -H "Content-Type: application/json" -d "{\"code\":\"$EDITABLE\",\"valid_until\":\"2031-04-05T06:07:08Z\"}")
+check "set_expiry: needs the admin secret" "$r" "Invalid or missing admin secret"
+r=$(adm set_expiry "{\"code\":\"$EDITABLE\"}"); check "set_expiry: needs a date" "$r" "code and valid_until are required"
+r=$(adm set_expiry "{\"code\":\"$EDITABLE\",\"valid_until\":\"2031-04-05 06:07:08\"}"); check "set_expiry: refuses a timezone-less date" "$r" "with a timezone"
+r=$(adm set_expiry "{\"code\":\"NO-SUCH-KEY\",\"valid_until\":\"2031-04-05T06:07:08Z\"}"); check "set_expiry: unknown key is clear" "$r" "No license key"
+unused=$(adm issue '{"license_duration_days":30}'); UNUSED=$(jget "$unused" code)
+r=$(adm set_expiry "{\"code\":\"$UNUSED\",\"valid_until\":\"2031-04-05T06:07:08Z\"}"); check "set_expiry: unused key is refused" "$r" "not been activated"
+r=$(adm set_expiry "{\"code\":\"$EDITABLE\",\"valid_until\":\"2031-04-05T06:07:08+03:00\"}")
+check "set_expiry: succeeds" "$(jget "$r" success)" "true"
+check "set_expiry: normalizes the instant to UTC" "$(jget "$r" valid_until)" "2031-04-05 03:07:08"
+check "set_expiry: database holds the exact corrected instant" "$(sql "SELECT valid_until FROM $DB.license_keys WHERE code='$EDITABLE';")" "2031-04-05 03:07:08"
 # a revoked license, and one nobody has used yet
 sql "UPDATE $DB.license_keys SET revoked = 1 WHERE code='$CODE2';"
 r=$(adm transfer_license "{\"code\":\"$CODE2\",\"new_device_id\":\"dev-x-$TS\"}")

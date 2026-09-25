@@ -254,6 +254,17 @@
     <div class="msg" id="extendMsg"></div>
   </div>
 
+  <div class="card" id="setExpiryCard">
+    <div class="card-title"><span class="emoji">📅</span> Change a license expiry date</div>
+    <label for="setExpiryCode">Activated license code</label>
+    <input id="setExpiryCode" placeholder="the activated code to correct">
+    <label for="setExpiryDate">New expiry date and time (your local time)</label>
+    <input id="setExpiryDate" type="datetime-local">
+    <button id="setExpiryBtn" onclick="setLicenseExpiry()">Change expiry date</button>
+    <div class="hint" style="margin-top:10px">This replaces the current end date exactly and can shorten or extend access. For a normal renewal, use Extend a license above.</div>
+    <div class="msg" id="setExpiryMsg"></div>
+  </div>
+
   <div class="card">
     <div class="card-title"><span class="emoji">🔎</span> Find a customer <span class="hint">reinstalled? start here</span></div>
     <label for="findQuery">Email they paid with, their device ID, or a license code</label>
@@ -981,6 +992,42 @@ async function extendLicense() {
   }
 }
 
+async function setLicenseExpiry() {
+  const code = document.getElementById('setExpiryCode').value.trim();
+  const localValue = document.getElementById('setExpiryDate').value;
+  document.getElementById('setExpiryMsg').className = 'msg';
+  if (!code || !localValue) {
+    showMsg('setExpiryMsg', 'Enter the activated license code and its new expiry date.', false);
+    return;
+  }
+  const expiry = new Date(localValue);
+  if (Number.isNaN(expiry.getTime())) {
+    showMsg('setExpiryMsg', 'Enter a valid expiry date and time.', false);
+    return;
+  }
+  if (!confirm(`Set license ${code.toUpperCase()} to expire at ${expiry.toLocaleString()}?\n\nThis replaces its current expiry date.`)) return;
+
+  const btn = document.getElementById('setExpiryBtn');
+  btn.disabled = true;
+  try {
+    const res = await fetch(serverUrl() + '?action=set_expiry', {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, valid_until: expiry.toISOString() }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      showMsg('setExpiryMsg', `Expiry changed - now valid until ${data.valid_until} UTC.`, true);
+    } else {
+      showMsg('setExpiryMsg', data.message || 'Could not change that expiry date.', false);
+    }
+  } catch (e) {
+    showMsg('setExpiryMsg', 'Could not reach the license server: ' + e, false);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // ---- Customers and purchases -------------------------------------------------
 // Everything below builds its rows with textContent, never innerHTML: emails and
 // device IDs are typed into the app by whoever installs it, so they are not
@@ -1051,8 +1098,17 @@ function renderFind(data) {
     item.append(node('div', 'dim', l.device_id ? `On device: ${l.device_id}` : 'Not on any device yet'));
     item.append(node('div', 'dim', l.valid_until ? `Valid until ${utc(l.valid_until)}` : (l.device_id ? 'Never expires' : '')));
     if (l.device_id && !l.revoked) {
+      const expiry = node('button', 'small secondary', 'Change expiry date...');
+      expiry.style.marginTop = '8px';
+      expiry.onclick = () => {
+        document.getElementById('setExpiryCode').value = l.code;
+        document.getElementById('setExpiryDate').focus();
+        document.getElementById('setExpiryCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      };
+      item.append(expiry);
       const move = node('button', 'small secondary', 'Move to a new device...');
       move.style.marginTop = '8px';
+      move.style.marginLeft = '8px';
       move.onclick = () => {
         document.getElementById('moveFrom').value = l.code;
         document.getElementById('moveTo').focus();
