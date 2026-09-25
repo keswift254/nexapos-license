@@ -67,9 +67,9 @@ r=$(curl -s "$LI?action=plans")
 check "plans: succeeds" "$r" '"success":true'
 check "plans: payments enabled" "$(jget "$r" purchasing_enabled)" "true"
 check "plans: KES" "$(jget "$r" currency)" "KES"
-check "plans: 3 months 1500" "$r" '{"id":"m3","label":"3 months","months":3,"days":0,"amount_kes":1500,"test":false}'
-check "plans: 6 months 3000" "$r" '{"id":"m6","label":"6 months","months":6,"days":0,"amount_kes":3000,"test":false}'
-check "plans: 1 year 4800" "$r" '{"id":"m12","label":"1 year","months":12,"days":0,"amount_kes":4800,"test":false}'
+check "plans: 3 months 1500" "$r" '{"id":"m3","label":"3 months","months":3,"amount_kes":1500}'
+check "plans: 6 months 3000" "$r" '{"id":"m6","label":"6 months","months":6,"amount_kes":3000}'
+check "plans: 1 year 4800" "$r" '{"id":"m12","label":"1 year","months":12,"amount_kes":4800}'
 check_not "plans: never mentions a trial" "$r" "trial"
 r=$(curl -s "$OFF?action=plans")
 check "plans: with no Paystack key, payments are reported as not available" "$(jget "$r" purchasing_enabled)" "false"
@@ -269,9 +269,17 @@ check_not "payment_done: does not claim the payment succeeded" "$page" "Payment 
 # for trying the whole payment flow with real money. Hidden by TEST_PLAN_ENABLED=0.
 # ======================================================================================
 section "the KSh 5 test plan"
+r=$(curl -s "$LI?action=plans&v=2")
+check "test plan (v=2, an app that understands it): listed, marked as a test, one day, KSh 5" "$r" '{"id":"test","label":"Test plan","months":0,"days":1,"amount_kes":5,"test":true}'
+check "test plan (v=2): the real plans are not marked as tests" "$r" '"amount_kes":1500,"test":false}'
+check "test plan (v=2): a real plan carries days 0" "$r" '{"id":"m3","label":"3 months","months":3,"days":0,"amount_kes":1500,"test":false}'
 r=$(curl -s "$LI?action=plans")
-check "test plan: listed, marked as a test, one day, KSh 5" "$r" '{"id":"test","label":"Test plan","months":0,"days":1,"amount_kes":5,"test":true}'
-check "test plan: the real plans are not marked as tests" "$r" '"amount_kes":1500,"test":false}'
+check "test plan (an app that predates it): shown, so it is visible on the screen it has today" "$r" '{"id":"test","label":"Test plan (1 day only)","months":1,"amount_kes":5}'
+check "test plan (old app): the label says what it really is" "$r" "1 day only"
+check_not "test plan (old app): none of the newer fields are sent to it" "$r" '"days"'
+check_not "test plan (old app): ...nor the test flag" "$r" '"test":'
+r=$(curl -s "$LI?action=plans&v=1")
+check "test plan: an unknown format number gets the old shape" "$r" '{"id":"test","label":"Test plan (1 day only)","months":1,"amount_kes":5}'
 DEVT="dev-testplan-$TS"
 r=$(post checkout_start "{\"device_id\":\"$DEVT\",\"plan_id\":\"test\",\"email\":\"tester@example.com\",\"amount_kes\":500,\"days\":400}")
 check "test plan: start succeeds (an app-sent amount/days is ignored, as for every plan)" "$r" '"success":true'

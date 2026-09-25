@@ -1011,7 +1011,8 @@ function callerIp(): string
 }
 
 if ($action === 'plans' && $method === 'GET') {
-    [$payload, $status] = purchasesService($pdo, $licenseConfig)->plans();
+    // ?v=2: the app understands `days` and `test` on a plan (see Purchases::plans).
+    [$payload, $status] = purchasesService($pdo, $licenseConfig)->plans(($_GET['v'] ?? '') === '2');
     jsonResponse($payload, $status);
 }
 

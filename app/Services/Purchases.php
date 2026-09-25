@@ -46,22 +46,39 @@ final class Purchases
     ) {
     }
 
-    /** @return array{0: array, 1: int} */
-    public function plans(): array
+    /**
+     * The plans on sale. [$richFormat] is asked for (`?v=2`) by apps that understand
+     * `days` and `test`; an older app gets the plain shape it has always had - and a
+     * short plan (the test plan) is described to it as one month, because it drops any
+     * plan without one. Its label says what it really is; what a purchase actually
+     * grants is always what this server stores, never what the app was shown.
+     *
+     * @return array{0: array, 1: int}
+     */
+    public function plans(bool $richFormat = false): array
     {
         return [[
             'success' => true,
             'purchasing_enabled' => $this->paystack->enabled(),
             'currency' => 'KES',
             'plans' => array_values(array_map(
-                static fn (array $plan): array => [
-                    'id' => $plan['id'],
-                    'label' => $plan['label'],
-                    'months' => $plan['months'],
-                    'days' => $plan['days'],
-                    'amount_kes' => $plan['amount_kes'],
-                    'test' => $plan['test'],
-                ],
+                fn (array $plan): array => $richFormat
+                    ? [
+                        'id' => $plan['id'],
+                        'label' => $plan['label'],
+                        'months' => $plan['months'],
+                        'days' => $plan['days'],
+                        'amount_kes' => $plan['amount_kes'],
+                        'test' => $plan['test'],
+                    ]
+                    : [
+                        'id' => $plan['id'],
+                        'label' => $plan['months'] < 1
+                            ? $plan['label'] . ' (' . self::lengthWords($plan['months'], $plan['days']) . ' only)'
+                            : $plan['label'],
+                        'months' => max(1, $plan['months']),
+                        'amount_kes' => $plan['amount_kes'],
+                    ],
                 $this->planList()
             )),
         ], 200];
