@@ -36,6 +36,8 @@ section() { IPN=$((IPN+1)); TEST_IP="10.1.0.$IPN"; echo "=== $1 ==="; }   # a fr
 post() { curl -s -X POST "$LI?action=$1" -H "Content-Type: application/json" -H "CF-Connecting-IP: $TEST_IP" -d "$2"; }
 fake() { curl -s -X POST "$FP/_test/$1" -H "Content-Type: application/json" -d "$2" >/dev/null; }
 hmac() { "$PHP" -r 'echo hash_hmac("sha512", $argv[1], $argv[2]);' "$1" "$2"; }
+mail_last() { curl -s -G "$FP/_test/mail" --data-urlencode "to=$1"; }
+mail_count() { jget "$(curl -s -G "$FP/_test/mail_count" --data-urlencode "to=$1")" count; }
 
 cleanup() {
   kill_port $FP_PORT; kill_port $LI_PORT; kill_port $OFF_PORT; kill_port $SLOW_PORT; kill_port $NOTEST_PORT; kill_port $OLD_PORT
@@ -144,6 +146,29 @@ v=$(curl -s -X POST "$LI?action=verify" -H "Authorization: Bearer $TOKEN")
 check "verify: the token is valid" "$(jget "$v" valid)" "true"
 act2=$(post activate "{\"code\":\"$CODE\",\"device_id\":\"another-device\"}")
 check "activate: the code does not work on another device" "$act2" "belongs to another device"
+
+section "the customer's receipt (ours, nicer than Paystack's, with no address of ours in it)"
+M=$(mail_last buyer@example.com); H=$(jget "$M" html); T=$(jget "$M" text)
+check "receipt: sent to the customer when the payment is confirmed" "$(jget "$M" subject)" "Payment received"
+check "receipt: the subject has the amount" "$(jget "$M" subject)" "KSh 3,000"
+check "receipt: shows the amount" "$H" "KSh 3,000"
+check "receipt: names the plan" "$H" "6 months"
+check "receipt: shows the reference" "$H" "$REF"
+check "receipt: shows the time in Nairobi" "$H" "EAT"
+check "receipt: says what happens next" "$H" "nothing to type"
+check "receipt: the wording asked for, in the HTML" "$H" "Reply directly to this email, or tap the WhatsApp button below to start a chat with us."
+check "receipt: a WhatsApp button" "$H" 'href="https://wa.me/message/M5SGWZ664XJ4C1"'
+check "receipt: ...labelled" "$H" "Chat on WhatsApp"
+check "receipt: the plain-text version says the same" "$T" "If you have any issue with your payment, reply directly to this email or message us on WhatsApp"
+check_not "receipt: none of the vendor's email addresses appear (HTML)" "$H" "condojuniur"
+check_not "receipt: no gmail address (HTML)" "$H" "gmail"
+check_not "receipt: no email address at all (HTML)" "$H" "@"
+check_not "receipt: no email address at all (text)" "$T" "@"
+check "receipt: replies go to the support inbox, though it is not printed" "$(jget "$M" replyTo)" "condojuniur@outlook.com"
+check "receipt: exactly one was sent" "$(mail_count buyer@example.com)" "1"
+post checkout_status "{\"reference\":\"$REF\",\"device_id\":\"$DEV\"}" >/dev/null
+post checkout_status "{\"reference\":\"$REF\",\"device_id\":\"$DEV\"}" >/dev/null
+check "receipt: asking again after it is paid does not send another" "$(mail_count buyer@example.com)" "1"
 
 section "wrong amount / wrong currency / failed"
 r=$(post checkout_start "{\"device_id\":\"dev-mm-$TS\",\"plan_id\":\"m3\",\"email\":\"m@m.co\"}"); REF2=$(jget "$r" reference)
@@ -499,6 +524,33 @@ r=$(post checkout_status "{\"reference\":\"$REFU2\",\"device_id\":\"$DEVU\"}")
 check "upgrading from a 3-month license to lifetime works" "$(jget "$r" status)" "issued"
 check "...and the new license has no end date" "$(sql "SELECT valid_until IS NULL FROM $DB.license_keys WHERE code='$(jget "$r" code)';")" "1"
 check "the vendor's purchases list shows the lifetime flag" "$(curl -s "$LI?action=list_purchases" -H "X-Admin-Secret: $SECRET")" '"plan_id":"life","months":0,"days":0,"lifetime":1'
+
+section "receipts: every way a payment is confirmed, and the ways it must not"
+check "a payment confirmed by Paystack's webhook gets a receipt too" "$(mail_count h@h.co)" "1"
+check "a failed payment (wrong amount) gets none" "$(mail_count m@m.co)" "0"
+check "a payment that was only started gets none" "$(mail_count new-price@example.com)" "0"
+check "the lifetime receipt says it never expires" "$(jget "$(mail_last forever@example.com)" html)" "never expires"
+check "the lifetime receipt names the plan" "$(jget "$(mail_last forever@example.com)" html)" "Lifetime"
+XSSNAME='A<b>&"x'
+adm save_plan '{"id":"xss","label":"A<b>&\"x","months":1,"amount_kes":100}' >/dev/null
+DEVX="dev-xss-$TS"
+r=$(post checkout_start "{\"device_id\":\"$DEVX\",\"plan_id\":\"xss\",\"email\":\"xss@example.com\"}"); REFX=$(jget "$r" reference)
+fake set "{\"reference\":\"$REFX\",\"status\":\"success\"}"
+post checkout_status "{\"reference\":\"$REFX\",\"device_id\":\"$DEVX\"}" >/dev/null
+HX=$(jget "$(mail_last xss@example.com)" html)
+check "a plan name with markup in it is escaped in the HTML" "$HX" 'A&lt;b&gt;&amp;&quot;x'
+check_not "...and never appears as live markup" "$HX" 'A<b>'
+adm delete_plan '{"id":"xss"}' >/dev/null
+# a mail outage must not touch the payment
+fake mode '{"mail_500":true}'
+DEVM="dev-mailout-$TS"
+r=$(post checkout_start "{\"device_id\":\"$DEVM\",\"plan_id\":\"m3\",\"email\":\"mailout@example.com\"}"); REFM=$(jget "$r" reference)
+fake set "{\"reference\":\"$REFM\",\"status\":\"success\"}"
+r=$(post checkout_status "{\"reference\":\"$REFM\",\"device_id\":\"$DEVM\"}")
+fake mode '{"mail_500":false}'
+check "a mail outage does not stop the license being issued" "$(jget "$r" status)" "issued"
+check "...and it is a real license" "$(sql "SELECT COUNT(*) FROM $DB.license_keys WHERE device_id='$DEVM';")" "1"
+check "...though no receipt could be sent" "$(mail_count mailout@example.com)" "0"
 
 # ======================================================================================
 # Getting a license onto a new device (Recovery.php): the customer's emailed-code route

@@ -35,7 +35,7 @@ class Mailer
      * show it instead of $textBody, which then only serves as the
      * fallback (some clients, spam filters, and previews still read it).
      */
-    public function send(string $toEmail, string $subject, string $textBody, ?string $htmlBody = null): void
+    public function send(string $toEmail, string $subject, string $textBody, ?string $htmlBody = null, ?string $replyTo = null): void
     {
         if ($this->apiKey === '' || $this->fromEmail === '') {
             throw new \RuntimeException('Mail is not configured (BREVO_API_KEY/MAIL_FROM).');
@@ -49,6 +49,10 @@ class Mailer
         ];
         if ($htmlBody !== null) {
             $payload['htmlContent'] = $htmlBody;
+        }
+        // Where a reply goes, without the address being printed anywhere in the mail.
+        if ($replyTo !== null && $replyTo !== '') {
+            $payload['replyTo'] = ['email' => $replyTo, 'name' => $this->fromName];
         }
 
         $ch = curl_init($this->baseUrl . '/v3/smtp/email');

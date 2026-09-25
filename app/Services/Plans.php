@@ -61,6 +61,17 @@ final class Plans
         ));
     }
 
+    /** One plan by code (on sale or not), or null. */
+    public function find(string $id): ?array
+    {
+        foreach ($this->all() as $plan) {
+            if ($plan['id'] === $id) {
+                return $plan;
+            }
+        }
+        return null;
+    }
+
     // ------------------------------------------------------------------ changing
 
     /** @return array{0: array, 1: int} */

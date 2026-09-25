@@ -28,7 +28,7 @@ if ($path === '/v3/smtp/email' && $method === 'POST') {
         $out(['message' => 'Mail outage'], 500);
     }
     $to = (string) ($body['to'][0]['email'] ?? '');
-    $state['mail'][$to][] = ['subject' => (string) ($body['subject'] ?? ''), 'text' => (string) ($body['textContent'] ?? ''), 'html' => (string) ($body['htmlContent'] ?? '')];
+    $state['mail'][$to][] = ['subject' => (string) ($body['subject'] ?? ''), 'text' => (string) ($body['textContent'] ?? ''), 'html' => (string) ($body['htmlContent'] ?? ''), 'replyTo' => (string) ($body['replyTo']['email'] ?? '')];
     $save();
     $out(['messageId' => 'fake'], 201);
 }

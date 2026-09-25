@@ -454,6 +454,38 @@ final class Purchases
         } catch (\Throwable $e) {
             error_log('[nexapos_license] Could not send the payment notification: ' . $e->getMessage());
         }
+        // ...and the customer's own receipt. Best effort like the note above: a mail
+        // hiccup must never touch a payment.
+        try {
+            $this->sendReceipt($purchase);
+        } catch (\Throwable $e) {
+            error_log('[nexapos_license] Could not send the customer receipt: ' . $e->getMessage());
+        }
+    }
+
+    /** The customer's "payment received" email (see Receipt). */
+    private function sendReceipt(array $purchase): void
+    {
+        $email = (string) ($purchase['email'] ?? '');
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return;
+        }
+        $lifetime = (int) ($purchase['lifetime'] ?? 0) === 1;
+        $stored = $this->planStore->find((string) $purchase['plan_id']);
+        $paidAt = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+            ->setTimezone(new \DateTimeZone('Africa/Nairobi'))
+            ->format('j M Y, H:i') . ' EAT';
+        $receipt = Receipt::build([
+            // The plan's name as it is now, else its code (a plan may have been removed since).
+            'label' => $stored['label'] ?? (string) $purchase['plan_id'],
+            'length' => $lifetime ? 'lifetime' : self::lengthWords((int) $purchase['months'], (int) ($purchase['days'] ?? 0)),
+            'amount_kes' => intdiv((int) $purchase['amount_minor'], 100),
+            'reference' => (string) $purchase['reference'],
+            'paid_at' => $paidAt,
+            'lifetime' => $lifetime,
+        ]);
+        // Replies go to the support inbox; the address itself is never shown in the mail.
+        (new Mailer($this->config))->send($email, $receipt['subject'], $receipt['text'], $receipt['html'], (string) ($this->config['notify_email'] ?? ''));
     }
 
     /**
