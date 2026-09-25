@@ -293,6 +293,18 @@
   </div>
 
   <div class="card">
+    <div class="card-title"><span class="emoji">🏷️</span> Plans &amp; prices <span class="hint">what customers can buy in the app</span></div>
+    <button id="plansBtn" class="secondary" onclick="loadPlans()">Show the plans</button>
+    <div class="hint" style="margin-top:10px">Change a price or how long a plan lasts, put a plan on or off sale, add one, or remove one. New payments use the change at once; somebody who is already paying keeps the price and length they started with. A "test plan" is the temporary token-price plan for trying a real payment.</div>
+    <div class="msg" id="plansMsg"></div>
+    <div id="plansList"></div>
+    <div id="planAdd" hidden>
+      <div class="list-title">Add a plan</div>
+      <div class="item" id="planAddRow"></div>
+    </div>
+  </div>
+
+  <div class="card">
     <div class="card-title"><span class="emoji">🚀</span> Publish app update <span class="hint">run once per real release</span></div>
     <div class="grid-2">
       <div>
@@ -1103,6 +1115,7 @@ function purchaseStatusChip(p) {
 }
 // How long a plan lasts, in words: months and/or days (the test plan is one day).
 function planLength(p) {
+  if (p.lifetime) return 'Lifetime';
   const parts = [];
   if (p.months > 0) parts.push(`${p.months} month${p.months === 1 ? '' : 's'}`);
   if (p.days > 0) parts.push(`${p.days} day${p.days === 1 ? '' : 's'}`);
@@ -1244,6 +1257,165 @@ async function loadPurchases() {
     showMsg('purchasesMsg', 'Could not reach the license server: ' + e, false);
   } finally {
     btn.disabled = false;
+  }
+}
+
+// ---- Plans & prices ----------------------------------------------------------
+// One editable row per plan; the server checks every value again, this only saves
+// a round trip for the obvious mistakes. Built with textContent/value, never innerHTML.
+function field(labelText, control) {
+  const wrap = node('div');
+  const label = node('label', null, labelText);
+  wrap.append(label, control);
+  return wrap;
+}
+function numberInput(value, min, placeholder) {
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = String(min);
+  input.value = value === undefined || value === null ? '' : String(value);
+  if (placeholder) input.placeholder = placeholder;
+  return input;
+}
+function textInput(value, placeholder, readOnly) {
+  const input = document.createElement('input');
+  input.value = value || '';
+  if (placeholder) input.placeholder = placeholder;
+  input.readOnly = !!readOnly;
+  return input;
+}
+function checkbox(labelText, checked) {
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = !!checked;
+  box.style.cssText = 'width:auto;margin:0 8px 0 0';
+  const label = node('label', null, '');
+  label.style.cssText = 'display:flex;align-items:center;margin:0 0 10px;font-weight:500;color:var(--text)';
+  label.append(box, document.createTextNode(labelText));
+  return { box, label };
+}
+
+// The controls of one plan, in [holder]. isNew: the code can be typed.
+function planEditor(holder, plan, isNew) {
+  const code = textInput(plan.id, 'e.g. m6 or lifetime', !isNew);
+  const label = textInput(plan.label, 'e.g. 6 months');
+  const months = numberInput(plan.months, 0, '0');
+  const days = numberInput(plan.days, 0, '0');
+  const price = numberInput(plan.amount_kes, 1, 'KSh');
+  const order = numberInput(plan.sort_order, -1000, '100');
+  const lifetime = checkbox('Lifetime (never expires)', plan.lifetime);
+  const onSale = checkbox('On sale', plan.active !== false);
+  const test = checkbox('Test plan', plan.test);
+  const syncLifetime = () => { months.disabled = days.disabled = lifetime.box.checked; };
+  lifetime.box.onchange = syncLifetime;
+  syncLifetime();
+
+  const grid = node('div', 'grid-2');
+  grid.append(field('Name customers see', label), field('Code (fixed once created)', code));
+  const grid2 = node('div', 'grid-2');
+  grid2.append(field('Months', months), field('Extra days', days));
+  const grid3 = node('div', 'grid-2');
+  grid3.append(field('Price (KSh)', price), field('Order (lower shows first)', order));
+  holder.append(grid, lifetime.label, grid2, grid3, onSale.label, test.label);
+
+  const collect = () => ({
+    id: code.value.trim(),
+    label: label.value.trim(),
+    months: lifetime.box.checked ? 0 : parseInt(months.value || '0', 10),
+    days: lifetime.box.checked ? 0 : parseInt(days.value || '0', 10),
+    lifetime: lifetime.box.checked,
+    amount_kes: parseInt(price.value || '0', 10),
+    sort_order: parseInt(order.value || '100', 10),
+    active: onSale.box.checked,
+    test: test.box.checked,
+  });
+  return { collect, code };
+}
+
+function renderPlans(plans) {
+  const list = document.getElementById('plansList');
+  list.replaceChildren();
+  if (!plans.length) list.append(node('div', 'empty', 'No plans yet - add one below. Until there is one, the app says plans are not available.'));
+  for (const plan of plans) {
+    const item = node('div', 'item');
+    const top = node('div', 'top');
+    top.append(node('span', 'mono', plan.label), plan.active ? chip('ok', 'On sale') : chip('mute', 'Hidden'));
+    item.append(top);
+    item.append(node('div', 'dim', `KSh ${plan.amount_kes} - ${planLength(plan)}${plan.test ? ' - test plan' : ''}`));
+    const details = document.createElement('details');
+    details.style.marginTop = '8px';
+    details.append(node('summary', null, 'Edit'));
+    const body = node('div');
+    body.style.marginTop = '10px';
+    const editor = planEditor(body, plan, false);
+    const save = node('button', 'small', 'Save changes');
+    save.style.marginRight = '8px';
+    save.onclick = () => savePlan(editor.collect(), save);
+    const remove = node('button', 'small danger', 'Remove this plan');
+    remove.onclick = () => removePlan(plan, remove);
+    const buttons = node('div');
+    buttons.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
+    buttons.append(save, remove);
+    body.append(buttons);
+    details.append(body);
+    item.append(details);
+    list.append(item);
+  }
+  // the add form
+  const addRow = document.getElementById('planAddRow');
+  addRow.replaceChildren();
+  const editor = planEditor(addRow, { id: '', label: '', months: 6, days: 0, lifetime: false, amount_kes: '', sort_order: (plans.length + 1) * 10, active: true, test: false }, true);
+  const add = node('button', 'small', 'Add plan');
+  add.onclick = () => savePlan(editor.collect(), add);
+  addRow.append(add);
+  document.getElementById('planAdd').hidden = false;
+}
+
+async function loadPlans() {
+  const btn = document.getElementById('plansBtn');
+  document.getElementById('plansMsg').className = 'msg';
+  btn.disabled = true;
+  try {
+    const data = await adminCall('list_plans');
+    if (!data.success) return showMsg('plansMsg', data.message || 'Could not load the plans.', false);
+    renderPlans(data.plans);
+  } catch (e) {
+    showMsg('plansMsg', 'Could not reach the license server: ' + e, false);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function savePlan(plan, button) {
+  document.getElementById('plansMsg').className = 'msg';
+  if (!plan.id || !plan.label) return showMsg('plansMsg', 'Give the plan a code and a name.', false);
+  if (!plan.lifetime && !(plan.months > 0 || plan.days > 0)) return showMsg('plansMsg', 'Say how long it lasts, or tick Lifetime.', false);
+  if (!(plan.amount_kes > 0)) return showMsg('plansMsg', 'Enter the price in shillings.', false);
+  button.disabled = true;
+  try {
+    const data = await adminCall('save_plan', plan);
+    if (!data.success) return showMsg('plansMsg', data.message || 'Could not save it.', false);
+    showMsg('plansMsg', `Saved "${plan.label}". Customers see it now.`, true);
+    renderPlans(data.plans);
+  } catch (e) {
+    showMsg('plansMsg', 'Could not reach the license server: ' + e, false);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function removePlan(plan, button) {
+  if (!confirm(`Remove the plan "${plan.label}"?\n\nCustomers stop seeing it. Anyone already paying for it still gets what they chose.`)) return;
+  button.disabled = true;
+  try {
+    const data = await adminCall('delete_plan', { id: plan.id });
+    if (!data.success) return showMsg('plansMsg', data.message || 'Could not remove it.', false);
+    showMsg('plansMsg', `Removed "${plan.label}".`, true);
+    renderPlans(data.plans);
+  } catch (e) {
+    showMsg('plansMsg', 'Could not reach the license server: ' + e, false);
+  } finally {
+    button.disabled = false;
   }
 }
 

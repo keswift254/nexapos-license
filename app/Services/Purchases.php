@@ -39,11 +39,14 @@ final class Purchases
     /** How many times one device may pay for the (temporary) test plan; a cheap plan must not become a way to stack days. */
     private const TEST_PLAN_PER_DEVICE = 3;
 
+    private Plans $planStore;
+
     public function __construct(
         private PDO $pdo,
         private array $config,
         private Paystack $paystack,
     ) {
+        $this->planStore = new Plans($pdo, $config);
     }
 
     /**
@@ -68,6 +71,7 @@ final class Purchases
                         'label' => $plan['label'],
                         'months' => $plan['months'],
                         'days' => $plan['days'],
+                        'lifetime' => $plan['lifetime'],
                         'amount_kes' => $plan['amount_kes'],
                         'test' => $plan['test'],
                     ]
@@ -79,7 +83,9 @@ final class Purchases
                         'months' => max(1, $plan['months']),
                         'amount_kes' => $plan['amount_kes'],
                     ],
-                $this->planList()
+                // An older app cannot draw a plan without an end date (it would call it
+                // "KSh 40 a month"), so it is simply not offered there.
+                array_filter($this->planList(), fn (array $plan): bool => $richFormat || !$plan['lifetime'])
             )),
         ], 200];
     }
@@ -106,6 +112,14 @@ final class Purchases
         }
 
         Database::ensurePurchaseTable();
+
+        $alreadyForever = $this->pdo->prepare(
+            'SELECT 1 FROM license_keys WHERE device_id = ? AND revoked = 0 AND valid_until IS NULL AND activated_at IS NOT NULL LIMIT 1'
+        );
+        $alreadyForever->execute([$deviceId]);
+        if ($alreadyForever->fetchColumn()) {
+            return [['success' => false, 'message' => 'This device already has a license that never expires - there is nothing to buy.'], 422];
+        }
 
         if ($plan['test']) {
             $paidBefore = $this->pdo->prepare("SELECT COUNT(*) FROM license_purchases WHERE device_id = ? AND plan_id = ? AND status IN ('paid', 'issued')");
@@ -147,10 +161,10 @@ final class Purchases
         $reference = 'nxl-' . bin2hex(random_bytes(10));
         $amountMinor = $plan['amount_kes'] * 100; // KES has 100 cents; Paystack works in the smallest unit
         $insert = $this->pdo->prepare(
-            'INSERT INTO license_purchases (reference, device_id, plan_id, months, days, amount_minor, currency, email, ip_address, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())'
+            'INSERT INTO license_purchases (reference, device_id, plan_id, months, days, lifetime, amount_minor, currency, email, ip_address, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())'
         );
-        $insert->execute([$reference, $deviceId, $planId, $plan['months'], $plan['days'], $amountMinor, 'KES', $email, $ip !== '' ? $ip : null]);
+        $insert->execute([$reference, $deviceId, $planId, $plan['months'], $plan['days'], (int) $plan['lifetime'], $amountMinor, 'KES', $email, $ip !== '' ? $ip : null]);
         $id = (int) $this->pdo->lastInsertId();
 
         try {
@@ -315,7 +329,7 @@ final class Purchases
     {
         Database::ensurePurchaseTable();
         $rows = $this->pdo->query(
-            'SELECT reference, device_id, plan_id, months, days, amount_minor, currency, email, status, paystack_status, license_code, created_at, paid_at, issued_at
+            'SELECT reference, device_id, plan_id, months, days, lifetime, amount_minor, currency, email, status, paystack_status, license_code, created_at, paid_at, issued_at
              FROM license_purchases ORDER BY id DESC LIMIT 100'
         )->fetchAll();
         foreach ($rows as &$row) {
@@ -327,33 +341,23 @@ final class Purchases
 
     // ---------------------------------------------------------------- internals
 
-    /** @return list<array{id: string, label: string, months: int, days: int, amount_kes: int, test: bool}> */
+    /**
+     * What can be bought right now (see Plans): the vendor's own list, managed from
+     * the generator.
+     *
+     * @return list<array>
+     */
     private function planList(): array
     {
-        $plans = [];
-        foreach ((array) ($this->config['plans'] ?? []) as $plan) {
-            if (!is_array($plan)) {
-                continue;
-            }
-            $id = (string) ($plan['id'] ?? '');
-            $months = (int) ($plan['months'] ?? 0);
-            $days = (int) ($plan['days'] ?? 0);
-            $amount = (int) ($plan['amount_kes'] ?? 0);
-            $test = !empty($plan['test']);
-            if ($id === '' || $months < 0 || $days < 0 || ($months < 1 && $days < 1) || $amount < 1) {
-                continue; // a malformed plan is left out rather than sold wrongly
-            }
-            if ($test && empty($this->config['test_plan_enabled'])) {
-                continue; // the test plan is switched off
-            }
-            $plans[] = ['id' => $id, 'label' => (string) ($plan['label'] ?? $id), 'months' => $months, 'days' => $days, 'amount_kes' => $amount, 'test' => $test];
-        }
-        return $plans;
+        return $this->planStore->active();
     }
 
-    /** Plain words for how long a plan lasts, for the vendor email: "6 months", "1 day", "1 month + 2 days". */
-    private static function lengthWords(int $months, int $days): string
+    /** Plain words for how long a plan lasts, for the vendor email: "6 months", "1 day", "1 month + 2 days", "a lifetime". */
+    private static function lengthWords(int $months, int $days, bool $lifetime = false): string
     {
+        if ($lifetime) {
+            return 'a lifetime';
+        }
         $parts = [];
         if ($months > 0) {
             $parts[] = $months . ($months === 1 ? ' month' : ' months');
@@ -380,7 +384,7 @@ final class Purchases
             'success' => true,
             'reference' => $reference,
             'authorization_url' => $url,
-            'plan' => ['id' => $plan['id'], 'label' => $plan['label'], 'months' => $plan['months'], 'days' => $plan['days'], 'amount_kes' => $plan['amount_kes'], 'test' => $plan['test']],
+            'plan' => ['id' => $plan['id'], 'label' => $plan['label'], 'months' => $plan['months'], 'days' => $plan['days'], 'lifetime' => $plan['lifetime'], 'amount_kes' => $plan['amount_kes'], 'test' => $plan['test']],
         ];
     }
 
@@ -443,7 +447,7 @@ final class Purchases
             $mailer->send(
                 (string) ($this->config['notify_email'] ?? ''),
                 'NexaPOS payment received: KSh ' . intdiv((int) $purchase['amount_minor'], 100),
-                "A license was paid for.\n\nPlan: " . $purchase['plan_id'] . ' (' . self::lengthWords((int) $purchase['months'], (int) ($purchase['days'] ?? 0)) . ")\nAmount: KSh " .
+                "A license was paid for.\n\nPlan: " . $purchase['plan_id'] . ' (' . self::lengthWords((int) $purchase['months'], (int) ($purchase['days'] ?? 0), (int) ($purchase['lifetime'] ?? 0) === 1) . ")\nAmount: KSh " .
                     intdiv((int) $purchase['amount_minor'], 100) . "\nCustomer email: " . $purchase['email'] .
                     "\nReference: " . $purchase['reference'] . "\nDevice: " . $purchase['device_id'] . "\n\nThe license is issued to the device automatically."
             );
@@ -473,6 +477,19 @@ final class Purchases
             }
             if ($purchase['status'] !== 'paid') {
                 throw new \RuntimeException('Purchase is not paid.');
+            }
+
+            if ((int) ($purchase['lifetime'] ?? 0) === 1) {
+                // No end date at all (the same as a key the vendor makes with "never expires").
+                $code = LicenseCode::generate($this->pdo);
+                $this->pdo->prepare(
+                    'INSERT INTO license_keys (code, expires_at, activated_at, device_id, valid_days, valid_until)
+                     VALUES (?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), UTC_TIMESTAMP(), ?, NULL, NULL)'
+                )->execute([$code, $purchase['device_id']]);
+                $this->pdo->prepare("UPDATE license_purchases SET status = 'issued', license_code = ?, issued_at = UTC_TIMESTAMP() WHERE id = ?")
+                    ->execute([$code, $purchaseId]);
+                $this->pdo->commit();
+                return $code;
             }
 
             // Renewing early must lose nothing: the new period starts when the

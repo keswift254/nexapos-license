@@ -52,25 +52,32 @@ $config = [
     // this often per purchase. (An override exists only so the tests need not wait.)
     'purchase_verify_every_seconds' => (int) (getenv('PURCHASE_VERIFY_EVERY_SECONDS') !== false ? getenv('PURCHASE_VERIFY_EVERY_SECONDS') : 2),
     'brevo_base_url' => getenv('BREVO_BASE_URL') ?: 'https://api.brevo.com',
-    // What is for sale. The SERVER decides prices and lengths: the app only
-    // displays what it is told, and the amount charged is always the one stored
-    // here, never one the app sends. `months` are calendar months from the moment
-    // the customer receives the license; `days` (optional, for short plans) are added
-    // on top. amount_kes is whole Kenya shillings.
-    'plans' => [
-        ['id' => 'm3', 'label' => '3 months', 'months' => 3, 'amount_kes' => 1500],
-        ['id' => 'm6', 'label' => '6 months', 'months' => 6, 'amount_kes' => 3000],
-        ['id' => 'm12', 'label' => '1 year', 'months' => 12, 'amount_kes' => 4800],
-        // A TEMPORARY KSh 5 plan for trying the whole payment flow with real money
-        // (Paystack, the webhook, activation). `days` instead of `months` (one day of
-        // license), and `test` marks it so the app shows it as a test and keeps it out
-        // of the "best value" comparison. An app that predates it drops it (it needs
-        // `months` of at least 1), so today's customers never see it. When the test is
-        // done, delete this line - or set TEST_PLAN_ENABLED=0 in the hosting dashboard
-        // to hide it at once. Anyone who has already paid for it still gets their day.
-        ['id' => 'test', 'label' => 'Test plan', 'months' => 0, 'days' => 1, 'amount_kes' => 5, 'test' => true],
-    ],
-    // The switch for the test plan above: on unless the environment says 0/false/off/no.
+    // What is for sale is kept in the database and managed from generator.html
+    // ("Plans & prices"): price, length, adding and removing plans. This list is only
+    // the STARTING set: it fills the table the first time it is created and is never
+    // read again, so deleting a plan in the generator really removes it. The SERVER
+    // decides prices and lengths - the app only displays what it is told, and the
+    // amount charged is always the one stored here, never one the app sends.
+    // A plan lasts `months` (calendar months from the moment the customer receives the
+    // license) plus `days`, or is `lifetime` (a license with no end date). amount_kes is
+    // whole Kenya shillings; `test` marks the temporary token-price plan for trying a
+    // real payment (it is hidden at once by TEST_PLAN_ENABLED=0).
+    // (LICENSE_PLANS_SEED, a JSON list, exists only so the tests can start from another set.)
+    'plans' => (static function (): array {
+        $override = getenv('LICENSE_PLANS_SEED');
+        if ($override !== false && $override !== '') {
+            $decoded = json_decode($override, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+        return [
+            ['id' => 'm6', 'label' => '6 months', 'months' => 6, 'amount_kes' => 1500],
+            ['id' => 'lifetime', 'label' => 'Lifetime', 'lifetime' => true, 'amount_kes' => 4800],
+            ['id' => 'test', 'label' => 'Test plan', 'days' => 1, 'amount_kes' => 5, 'test' => true],
+        ];
+    })(),
+    // The switch for the test plan (any plan marked `test`): on unless the environment says 0/false/off/no.
     'test_plan_enabled' => !in_array(strtolower((string) getenv('TEST_PLAN_ENABLED')), ['0', 'false', 'off', 'no'], true),
 ];
 

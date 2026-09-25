@@ -18,6 +18,7 @@ use License\Core\LicenseCode;
 use License\Core\SupportRecovery;
 use License\Services\Mailer;
 use License\Services\Paystack;
+use License\Services\Plans;
 use License\Services\Purchases;
 use License\Services\Recovery;
 
@@ -1008,6 +1009,27 @@ function callerIp(): string
         return $forwarded;
     }
     return trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+}
+
+/**
+ * The vendor's plans: what is for sale, its price and how long it lasts (see
+ * Services/Plans.php). All behind the admin secret; the public list is `plans`.
+ */
+if ($action === 'list_plans' && $method === 'GET') {
+    requireAdmin($licenseConfig);
+    jsonResponse(['success' => true, 'plans' => (new Plans($pdo, $licenseConfig))->all(), 'max_plans' => Plans::MAX_PLANS]);
+}
+
+if ($action === 'save_plan' && $method === 'POST') {
+    requireAdmin($licenseConfig);
+    [$payload, $status] = (new Plans($pdo, $licenseConfig))->save(requestBody());
+    jsonResponse($payload, $status);
+}
+
+if ($action === 'delete_plan' && $method === 'POST') {
+    requireAdmin($licenseConfig);
+    [$payload, $status] = (new Plans($pdo, $licenseConfig))->delete((string) (requestBody()['id'] ?? ''));
+    jsonResponse($payload, $status);
 }
 
 if ($action === 'plans' && $method === 'GET') {

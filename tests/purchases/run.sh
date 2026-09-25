@@ -50,9 +50,12 @@ sleep 1
 # The fake Paystack
 "$PHP" -S 127.0.0.1:$FP_PORT "$SCR/fake_paystack.php" >/tmp/fp.log 2>&1 &
 # The license server WITH payments enabled (verify throttle off so tests need not wait)
+# The plans live in the database and start from this set (config/license.php normally supplies the
+# real shipped one - "the shipped starting plans" below checks that on a database of its own).
+SEED='[{"id":"m3","label":"3 months","months":3,"amount_kes":1500},{"id":"m6","label":"6 months","months":6,"amount_kes":3000},{"id":"m12","label":"1 year","months":12,"amount_kes":4800},{"id":"life","label":"Lifetime","lifetime":true,"amount_kes":7000},{"id":"test","label":"Test plan","days":1,"amount_kes":5,"test":true}]'
 start_license() { # port extra-env...
   local port=$1; shift
-  env DB_NAME="$DB" LICENSE_ADMIN_SECRET="$SECRET" PAYSTACK_BASE_URL="$FP" LICENSE_PUBLIC_BASE_URL="http://127.0.0.1:$LI_PORT/index.php" "$@" \
+  env DB_NAME="$DB" LICENSE_PLANS_SEED="$SEED" LICENSE_ADMIN_SECRET="$SECRET" PAYSTACK_BASE_URL="$FP" LICENSE_PUBLIC_BASE_URL="http://127.0.0.1:$LI_PORT/index.php" "$@" \
     "$PHP" -S 127.0.0.1:$port -t "$LIC/public" >/tmp/li_$port.log 2>&1 &
 }
 start_license $LI_PORT PAYSTACK_SECRET_KEY=$KEY PAYSTACK_SUBACCOUNT=ACCT_fake123 PURCHASE_VERIFY_EVERY_SECONDS=0 BREVO_API_KEY=fake-brevo-key MAIL_FROM=noreply@nexapos.test BREVO_BASE_URL="$FP"
@@ -270,9 +273,9 @@ check_not "payment_done: does not claim the payment succeeded" "$page" "Payment 
 # ======================================================================================
 section "the KSh 5 test plan"
 r=$(curl -s "$LI?action=plans&v=2")
-check "test plan (v=2, an app that understands it): listed, marked as a test, one day, KSh 5" "$r" '{"id":"test","label":"Test plan","months":0,"days":1,"amount_kes":5,"test":true}'
+check "test plan (v=2, an app that understands it): listed, marked as a test, one day, KSh 5" "$r" '{"id":"test","label":"Test plan","months":0,"days":1,"lifetime":false,"amount_kes":5,"test":true}'
 check "test plan (v=2): the real plans are not marked as tests" "$r" '"amount_kes":1500,"test":false}'
-check "test plan (v=2): a real plan carries days 0" "$r" '{"id":"m3","label":"3 months","months":3,"days":0,"amount_kes":1500,"test":false}'
+check "test plan (v=2): a real plan carries days 0" "$r" '{"id":"m3","label":"3 months","months":3,"days":0,"lifetime":false,"amount_kes":1500,"test":false}'
 r=$(curl -s "$LI?action=plans")
 check "test plan (an app that predates it): shown, so it is visible on the screen it has today" "$r" '{"id":"test","label":"Test plan (1 day only)","months":1,"amount_kes":5}'
 check "test plan (old app): the label says what it really is" "$r" "1 day only"
@@ -371,6 +374,131 @@ d=$(sql "SELECT TIMESTAMPDIFF(DAY, UTC_TIMESTAMP(), valid_until) FROM $OLDDB.lic
 if [ "$d" -ge 89 ] && [ "$d" -le 92 ]; then check "migration: ...for its 3 months ($d days), the extra days defaulting to 0" ok ok; else check "migration: 3 months" "$d days" "89-92"; fi
 r=$(curl -s -X POST "$OLD?action=checkout_start" -H "Content-Type: application/json" -H "CF-Connecting-IP: $TEST_IP" -d "{\"device_id\":\"dev-old-2-$TS\",\"plan_id\":\"test\",\"email\":\"n@n.co\"}")
 check "migration: and the upgraded table can start a test purchase" "$(jget "$r" success)" "true"
+
+# ======================================================================================
+# Plans are the vendor's to change (Services/Plans.php): price, length, add, hide, remove,
+# and lifetime plans. Everything a purchase needs is stored WITH the purchase, so changing a
+# plan can never change what somebody who is already paying gets.
+# ======================================================================================
+adm() { curl -s -X POST "$LI?action=$1" -H "X-Admin-Secret: $SECRET" -H "Content-Type: application/json" -H "CF-Connecting-IP: $TEST_IP" -d "$2"; }
+
+section "the shipped starting plans (a fresh database, nothing configured)"
+r=$(curl -s "$OLD?action=plans&v=2")
+check "defaults: 6 months at KSh 1,500" "$r" '{"id":"m6","label":"6 months","months":6,"days":0,"lifetime":false,"amount_kes":1500,"test":false}'
+check "defaults: Lifetime at KSh 4,800" "$r" '{"id":"lifetime","label":"Lifetime","months":0,"days":0,"lifetime":true,"amount_kes":4800,"test":false}'
+check "defaults: the temporary KSh 5 test plan" "$r" '"id":"test"'
+check_not "defaults: no 3-month plan" "$r" '"id":"m3"'
+check_not "defaults: no 1-year plan" "$r" '"id":"m12"'
+r=$(curl -s "$OLD?action=plans")
+check_not "defaults: an app that cannot draw a lifetime plan is not offered it" "$r" 'ifetime'
+check "defaults: ...but is offered the 6 months" "$r" '{"id":"m6","label":"6 months","months":6,"amount_kes":1500}'
+
+section "managing plans: the admin secret guards everything"
+r=$(curl -s "$LI?action=list_plans");                                       check "list_plans: needs the admin secret" "$r" "Invalid or missing admin secret"
+r=$(curl -s -X POST "$LI?action=save_plan" -d '{"id":"x"}');                 check "save_plan: needs the admin secret" "$r" "Invalid or missing admin secret"
+r=$(curl -s -X POST "$LI?action=delete_plan" -d '{"id":"m3"}');              check "delete_plan: needs the admin secret" "$r" "Invalid or missing admin secret"
+check "nothing was changed by those" "$(sql "SELECT COUNT(*) FROM $DB.license_plans WHERE id='m3';")" "1"
+r=$(curl -s "$LI?action=list_plans" -H "X-Admin-Secret: $SECRET")
+check "list_plans: every plan, with whether it is on sale" "$r" '"id":"m3"'
+check "list_plans: says how many plans there is room for" "$r" '"max_plans":12'
+
+section "managing plans: a new plan, a new price, hiding, removing"
+r=$(adm save_plan '{"id":"quarter","label":"Quarter","months":3,"amount_kes":1200,"sort_order":15}')
+check "a new plan is saved" "$r" '"success":true'
+r=$(curl -s "$LI?action=plans")
+check "...and is on sale at once" "$r" '{"id":"quarter","label":"Quarter","months":3,"amount_kes":1200}'
+# a customer is mid-payment on the 6-month plan at the OLD price...
+DEVP1="dev-price-old-$TS"
+r=$(post checkout_start "{\"device_id\":\"$DEVP1\",\"plan_id\":\"m6\",\"email\":\"old-price@example.com\"}"); REFP1=$(jget "$r" reference)
+p=$(curl -s "$FP/_test/payload?reference=$REFP1")
+check "Paystack was asked for the current price: KSh 3,000" "$(jget "$p" amount)" "300000"
+r=$(adm save_plan '{"id":"m6","label":"6 months","months":6,"amount_kes":2500,"sort_order":20}')
+check "the price is changed" "$r" '"success":true'
+check "the public list shows the new price" "$(curl -s "$LI?action=plans")" '{"id":"m6","label":"6 months","months":6,"amount_kes":2500}'
+fake set "{\"reference\":\"$REFP1\",\"status\":\"success\"}"
+r=$(post checkout_status "{\"reference\":\"$REFP1\",\"device_id\":\"$DEVP1\"}")
+check "...and the customer who started at the old price is still served at it (the stored amount is what counts)" "$(jget "$r" status)" "issued"
+days=$(sql "SELECT TIMESTAMPDIFF(DAY, UTC_TIMESTAMP(), valid_until) FROM $DB.license_keys WHERE device_id='$DEVP1';")
+if [ "$days" -ge 179 ] && [ "$days" -le 182 ]; then check "...for the length they chose (6 months, $days days)" ok ok; else check "...for the length they chose" "$days days" "179-182 days"; fi
+DEVP2="dev-price-new-$TS"
+r=$(post checkout_start "{\"device_id\":\"$DEVP2\",\"plan_id\":\"m6\",\"email\":\"new-price@example.com\"}"); REFP2=$(jget "$r" reference)
+p=$(curl -s "$FP/_test/payload?reference=$REFP2")
+check "a NEW checkout asks Paystack for the new price: KSh 2,500" "$(jget "$p" amount)" "250000"
+adm save_plan '{"id":"m6","label":"6 months","months":6,"amount_kes":3000,"sort_order":20}' >/dev/null   # back, so the rest of the tests see what they always did
+
+r=$(adm save_plan '{"id":"quarter","label":"Quarter","months":3,"amount_kes":1200,"sort_order":15,"active":false}')
+check "a plan can be hidden without deleting it" "$r" '"success":true'
+check_not "hidden: not on sale" "$(curl -s "$LI?action=plans")" '"id":"quarter"'
+check "hidden: still in the vendor's list, marked off" "$(curl -s "$LI?action=list_plans" -H "X-Admin-Secret: $SECRET")" '"id":"quarter","label":"Quarter","months":3,"days":0,"lifetime":false,"amount_kes":1200,"test":false,"active":false'
+r=$(post checkout_start "{\"device_id\":\"dev-hidden-$TS\",\"plan_id\":\"quarter\",\"email\":\"h@h.co\"}")
+check "hidden: cannot be started" "$r" "Choose one of the listed plans"
+
+adm save_plan '{"id":"quarter","label":"Quarter","months":3,"amount_kes":1200,"sort_order":15,"active":true}' >/dev/null
+DEVQ="dev-quarter-$TS"
+r=$(post checkout_start "{\"device_id\":\"$DEVQ\",\"plan_id\":\"quarter\",\"email\":\"q@q.co\"}"); REFQ=$(jget "$r" reference)
+r=$(adm delete_plan '{"id":"quarter"}')
+check "a plan can be removed" "$r" '"success":true'
+check_not "removed: not on sale" "$(curl -s "$LI?action=plans")" '"id":"quarter"'
+check_not "removed: gone from the vendor's list" "$(curl -s "$LI?action=list_plans" -H "X-Admin-Secret: $SECRET")" '"id":"quarter"'
+fake set "{\"reference\":\"$REFQ\",\"status\":\"success\"}"
+r=$(post checkout_status "{\"reference\":\"$REFQ\",\"device_id\":\"$DEVQ\"}")
+check "removed: somebody who was already paying for it still gets it (3 months)" "$(jget "$r" status)" "issued"
+r=$(adm delete_plan '{"id":"quarter"}');                                     check "removing what is not there says so" "$r" "No such plan"
+
+section "managing plans: bad input is refused, in words"
+r=$(adm save_plan '{"id":"Bad Id!","label":"x","months":1,"amount_kes":100}');  check "a bad plan code" "$r" "plan code must be"
+r=$(adm save_plan '{"id":"ok","label":"","months":1,"amount_kes":100}');       check "no name" "$r" "Give the plan a name"
+LONG=$(printf 'x%.0s' $(seq 1 41))
+r=$(adm save_plan "{\"id\":\"ok\",\"label\":\"$LONG\",\"months\":1,\"amount_kes\":100}"); check "a name that is too long" "$r" "Give the plan a name"
+r=$(adm save_plan '{"id":"ok","label":"Nothing","months":0,"days":0,"amount_kes":100}'); check "no length at all" "$r" "Say how long"
+r=$(adm save_plan '{"id":"ok","label":"X","months":-1,"amount_kes":100}');     check "a negative length" "$r" "Months must be"
+r=$(adm save_plan '{"id":"ok","label":"X","months":999,"amount_kes":100}');    check "an absurd length" "$r" "Months must be"
+r=$(adm save_plan '{"id":"ok","label":"X","months":1,"amount_kes":0}');        check "a price of nothing" "$r" "price must be"
+r=$(adm save_plan '{"id":"ok","label":"X","months":1,"amount_kes":"abc"}');    check "a price that is not a number" "$r" "price must be"
+r=$(adm save_plan '{"id":"ok","label":"X","months":1,"amount_kes":99999999}'); check "a price beyond reason" "$r" "price must be"
+check "none of those created anything" "$(sql "SELECT COUNT(*) FROM $DB.license_plans WHERE id IN ('ok','bad id!','Bad Id!');")" "0"
+for i in 1 2 3 4 5 6 7 8; do adm save_plan "{\"id\":\"fill$i\",\"label\":\"Fill $i\",\"months\":1,\"amount_kes\":100}" >/dev/null; done
+check "there is a limit on how many plans exist" "$(sql "SELECT COUNT(*) FROM $DB.license_plans;")" "12"
+r=$(adm save_plan '{"id":"onetoomany","label":"Too many","months":1,"amount_kes":100}'); check "the plan over the limit is refused" "$r" "room for 12 plans"
+r=$(adm save_plan '{"id":"fill1","label":"Fill 1 renamed","months":1,"amount_kes":150}'); check "but changing an existing plan at the limit is fine" "$r" '"success":true'
+for i in 1 2 3 4 5 6 7 8; do adm delete_plan "{\"id\":\"fill$i\"}" >/dev/null; done
+check "cleaned up" "$(sql "SELECT COUNT(*) FROM $DB.license_plans WHERE id LIKE 'fill%';")" "0"
+r=$(adm save_plan '{"id":"  UPPER  ","label":"Case","months":1,"amount_kes":100}'); check "a plan code is tidied (trimmed, lower-case)" "$(sql "SELECT COUNT(*) FROM $DB.license_plans WHERE id='upper';")" "1"
+adm delete_plan '{"id":"upper"}' >/dev/null
+
+section "lifetime plans"
+r=$(curl -s "$LI?action=plans&v=2")
+check "an app that understands it is offered the lifetime plan" "$r" '{"id":"life","label":"Lifetime","months":0,"days":0,"lifetime":true,"amount_kes":7000,"test":false}'
+check_not "an app that predates it is not (it would call it KSh 40 a month)" "$(curl -s "$LI?action=plans")" '"id":"life"'
+DEVL="dev-lifetime-$TS"
+r=$(post checkout_start "{\"device_id\":\"$DEVL\",\"plan_id\":\"life\",\"email\":\"forever@example.com\",\"months\":1,\"days\":1}"); REFL=$(jget "$r" reference)
+check "lifetime: the plan echoed back is lifetime" "$(jget "$r" plan.lifetime)" "true"
+p=$(curl -s "$FP/_test/payload?reference=$REFL")
+check "lifetime: Paystack asked for KSh 7,000 (the app's own months/days ignored)" "$(jget "$p" amount)" "700000"
+check "DB row: lifetime" "$(sql "SELECT CONCAT(plan_id,'|',months,'|',days,'|',lifetime) FROM $DB.license_purchases WHERE reference='$REFL';")" "life|0|0|1"
+fake set "{\"reference\":\"$REFL\",\"status\":\"success\"}"
+r=$(post checkout_status "{\"reference\":\"$REFL\",\"device_id\":\"$DEVL\"}")
+check "lifetime: issued once Paystack confirms" "$(jget "$r" status)" "issued"
+CODEL=$(jget "$r" code)
+check "lifetime: the license has no end date" "$(sql "SELECT CONCAT(IFNULL(valid_until,'none'),'|',IFNULL(valid_days,'none')) FROM $DB.license_keys WHERE code='$CODEL';")" "none|none"
+act=$(post activate "{\"code\":\"$CODEL\",\"device_id\":\"$DEVL\"}")
+check "lifetime: it activates" "$act" '"success":true'
+check "lifetime: activation says it has no end date" "$(jget "$act" valid_until)" ""
+v=$(curl -s -X POST "$LI?action=verify" -H "Authorization: Bearer $(jget "$act" activation_token)")
+check "lifetime: verify says valid" "$(jget "$v" valid)" "true"
+r=$(post checkout_start "{\"device_id\":\"$DEVL\",\"plan_id\":\"m6\",\"email\":\"forever@example.com\"}")
+check "lifetime: a device that has one has nothing more to buy" "$r" "never expires"
+check "lifetime: ...and no checkout was created" "$(sql "SELECT COUNT(*) FROM $DB.license_purchases WHERE device_id='$DEVL' AND plan_id='m6';")" "0"
+# somebody with a running 3-month license buys the lifetime plan
+DEVU="dev-upgrade-$TS"
+r=$(post checkout_start "{\"device_id\":\"$DEVU\",\"plan_id\":\"m3\",\"email\":\"up@example.com\"}"); REFU1=$(jget "$r" reference)
+fake set "{\"reference\":\"$REFU1\",\"status\":\"success\"}"; post checkout_status "{\"reference\":\"$REFU1\",\"device_id\":\"$DEVU\"}" >/dev/null
+r=$(post checkout_start "{\"device_id\":\"$DEVU\",\"plan_id\":\"life\",\"email\":\"up@example.com\"}"); REFU2=$(jget "$r" reference)
+fake set "{\"reference\":\"$REFU2\",\"status\":\"success\"}"
+r=$(post checkout_status "{\"reference\":\"$REFU2\",\"device_id\":\"$DEVU\"}")
+check "upgrading from a 3-month license to lifetime works" "$(jget "$r" status)" "issued"
+check "...and the new license has no end date" "$(sql "SELECT valid_until IS NULL FROM $DB.license_keys WHERE code='$(jget "$r" code)';")" "1"
+check "the vendor's purchases list shows the lifetime flag" "$(curl -s "$LI?action=list_purchases" -H "X-Admin-Secret: $SECRET")" '"plan_id":"life","months":0,"days":0,"lifetime":1'
 
 # ======================================================================================
 # Getting a license onto a new device (Recovery.php): the customer's emailed-code route

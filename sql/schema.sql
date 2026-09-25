@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS license_purchases (
     plan_id VARCHAR(20) NOT NULL,
     months INT NOT NULL,
     days INT NOT NULL DEFAULT 0,
+    lifetime TINYINT(1) NOT NULL DEFAULT 0,
     amount_minor INT NOT NULL,
     currency CHAR(3) NOT NULL DEFAULT 'KES',
     email VARCHAR(190) NOT NULL,
@@ -67,6 +68,11 @@ CREATE TABLE IF NOT EXISTS license_purchases (
     INDEX (ip_address, created_at),
     INDEX (status, created_at)
 );
+
+-- What can be bought from the activation screen is kept in `license_plans` and managed from
+-- generator.html ("Plans & prices"). It is deliberately NOT created here: Services/Plans.php
+-- creates it the first time a plan is read and fills it with the starting set from
+-- config/license.php at that moment - a table made empty here would never be filled.
 
 -- Moving a license to a new device (a reinstall gives the app a new device ID).
 -- license_transfers logs every move (by 'self' = the customer proving they own the

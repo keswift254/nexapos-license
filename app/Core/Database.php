@@ -169,7 +169,7 @@ class Database
             return;
         }
         // "_v2": the table gained a `days` column; an older note must not skip the check.
-        $note = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'nexapos_license_purchases_table_v2_' . sha1(self::$databaseKey);
+        $note = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'nexapos_license_purchases_table_v3_' . sha1(self::$databaseKey);
         $noteTime = @filemtime($note);
         if ($noteTime !== false && (time() - $noteTime) < self::CHECK_NOTE_TTL_SECONDS) {
             self::$purchaseTableChecked = true;
@@ -183,6 +183,7 @@ class Database
                 plan_id VARCHAR(20) NOT NULL,
                 months INT NOT NULL,
                 days INT NOT NULL DEFAULT 0,
+                lifetime TINYINT(1) NOT NULL DEFAULT 0,
                 amount_minor INT NOT NULL,
                 currency CHAR(3) NOT NULL DEFAULT \'KES\',
                 email VARCHAR(190) NOT NULL,
@@ -207,6 +208,17 @@ class Database
                 self::$connection->exec('ALTER TABLE license_purchases ADD COLUMN days INT NOT NULL DEFAULT 0 AFTER months');
             } catch (PDOException $exception) {
                 if (($exception->errorInfo[1] ?? null) !== 1060) { // 1060 = another request added it first
+                    throw $exception;
+                }
+            }
+        }
+        // ... and `lifetime` (a plan with no end date).
+        $hasLifetime = self::$connection->query("SHOW COLUMNS FROM license_purchases LIKE 'lifetime'")->fetchColumn();
+        if (!$hasLifetime) {
+            try {
+                self::$connection->exec('ALTER TABLE license_purchases ADD COLUMN lifetime TINYINT(1) NOT NULL DEFAULT 0 AFTER days');
+            } catch (PDOException $exception) {
+                if (($exception->errorInfo[1] ?? null) !== 1060) {
                     throw $exception;
                 }
             }
