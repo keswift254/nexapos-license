@@ -1380,10 +1380,31 @@ async function loadPlans() {
     if (!data.success) return showMsg('plansMsg', data.message || 'Could not load the plans.', false);
     renderPlans(data.plans);
   } catch (e) {
-    showMsg('plansMsg', 'Could not reach the license server: ' + e, false);
+    showMsg('plansMsg', 'Could not load plans from the license server: ' + e, false);
   } finally {
     btn.disabled = false;
   }
+}
+
+// The editor response shows what the admin API saved; verify separately what
+// an activation screen can actually read before claiming customers see it.
+async function verifyPublicPlans(adminPlans) {
+  const url = new URL(serverUrl());
+  url.searchParams.set('action', 'plans');
+  url.searchParams.set('v', '2');
+  url.searchParams.set('_', Date.now().toString());
+  const response = await fetch(url, { cache: 'no-store' });
+  const publicData = await response.json();
+  if (!response.ok || !publicData.success || !Array.isArray(publicData.plans)) {
+    throw new Error('Public plans endpoint did not confirm the change.');
+  }
+  const expected = adminPlans.filter(p => p.active && (!p.test || publicData.plans.some(q => q.id === p.id)));
+  const fields = ['id', 'label', 'months', 'days', 'lifetime', 'amount_kes', 'test'];
+  const matches = expected.length === publicData.plans.length && expected.every(p => {
+    const visible = publicData.plans.find(q => q.id === p.id);
+    return visible && fields.every(key => p[key] === visible[key]);
+  });
+  if (!matches) throw new Error('Saved, but the public plans still differ. Check the license server address above and refresh this page.');
 }
 
 async function savePlan(plan, button) {
@@ -1395,10 +1416,11 @@ async function savePlan(plan, button) {
   try {
     const data = await adminCall('save_plan', plan);
     if (!data.success) return showMsg('plansMsg', data.message || 'Could not save it.', false);
-    showMsg('plansMsg', `Saved "${plan.label}". Customers see it now.`, true);
     renderPlans(data.plans);
+    await verifyPublicPlans(data.plans);
+    showMsg('plansMsg', `Saved "${plan.label}" and verified the public plans. Open activation screens refresh automatically.`, true);
   } catch (e) {
-    showMsg('plansMsg', 'Could not reach the license server: ' + e, false);
+    showMsg('plansMsg', 'Plan save or public verification failed: ' + e, false);
   } finally {
     button.disabled = false;
   }
@@ -1410,10 +1432,11 @@ async function removePlan(plan, button) {
   try {
     const data = await adminCall('delete_plan', { id: plan.id });
     if (!data.success) return showMsg('plansMsg', data.message || 'Could not remove it.', false);
-    showMsg('plansMsg', `Removed "${plan.label}".`, true);
     renderPlans(data.plans);
+    await verifyPublicPlans(data.plans);
+    showMsg('plansMsg', `Removed "${plan.label}" and verified the public plans.`, true);
   } catch (e) {
-    showMsg('plansMsg', 'Could not reach the license server: ' + e, false);
+    showMsg('plansMsg', 'Plan removal or public verification failed: ' + e, false);
   } finally {
     button.disabled = false;
   }
