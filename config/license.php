@@ -32,7 +32,7 @@ $config = [
     // one side without the other, this call just starts failing
     // harmlessly (see revoke()'s try/catch) rather than breaking the
     // license revoke itself.
-    'platform_base_url' => getenv('NEXAPOS_PLATFORM_BASE_URL') ?: 'https://nexapos-platform.onrender.com/index.php',
+    'platform_base_url' => getenv('NEXAPOS_PLATFORM_BASE_URL') ?: 'https://sync.nexapos.cc/index.php',
 
     // --- Selling licenses from the activation screen (app/Services/Purchases.php) ---
     // The vendor's OWN Paystack account. The secret key is set in the hosting
@@ -47,7 +47,7 @@ $config = [
     'paystack_base_url' => getenv('PAYSTACK_BASE_URL') ?: 'https://api.paystack.co',
     // This server's own public address: where Paystack sends the customer's
     // browser after paying (a "payment received" page), see payment_done.
-    'public_base_url' => getenv('LICENSE_PUBLIC_BASE_URL') ?: 'https://nexapos-license-1.onrender.com/index.php',
+    'public_base_url' => getenv('LICENSE_PUBLIC_BASE_URL') ?: 'https://license.nexapos.cc/index.php',
     // The app polls for its payment every few seconds; Paystack is asked at most
     // this often per purchase. (An override exists only so the tests need not wait.)
     'purchase_verify_every_seconds' => (int) (getenv('PURCHASE_VERIFY_EVERY_SECONDS') !== false ? getenv('PURCHASE_VERIFY_EVERY_SECONDS') : 2),
