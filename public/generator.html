@@ -1093,7 +1093,7 @@ function isPast(s) { return !!s && new Date(String(s).replace(' ', 'T') + 'Z').g
 function listTitle(text) { return node('div', 'list-title', text); }
 
 async function adminCall(action, body) {
-  const options = { headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' } };
+  const options = { cache: 'no-store', headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' } };
   if (body) { options.method = 'POST'; options.body = JSON.stringify(body); }
   const res = await fetch(serverUrl() + '?action=' + action, options);
   return res.json();
