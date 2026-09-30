@@ -1,0 +1,31 @@
+name: Verify production payment return
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-production-1.0.57.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify web payment return is live
+        shell: bash
+        run: |
+          set -euo pipefail
+          headers="$(mktemp)"
+          body="$(mktemp)"
+          code="$(curl -sS -D "$headers" -o "$body" -w '%{http_code}' --max-time 30             'https://license.nexapos.cc/index.php?action=payment_done&return=web' || true)"
+          echo "HTTP $code"
+          cat "$headers"
+          if [ "$code" != "302" ]; then
+            echo "Expected HTTP 302 from new web-return handler." >&2
+            exit 1
+          fi
+          grep -qi '^location: https://nexapos.cc/app/?payment_return=1' "$headers"
+          echo 'VERIFIED payment_done web return is live.'
