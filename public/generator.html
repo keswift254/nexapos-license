@@ -428,9 +428,15 @@ let countdownInterval = null;
 // Defaults to wherever this page is actually being served from (local
 // XAMPP or the live Render deployment) rather than a hardcoded
 // localhost URL, so the same file works correctly either way without
-// editing.
+// editing. On production, the field is pinned to the live license API.
 if (location.protocol === 'http:' || location.protocol === 'https:') {
   document.getElementById('serverUrl').value = location.origin + '/index.php';
+}
+// The production generator must only edit the production license database.
+// An old value pasted into this field can make a successful save go to a
+// different deployment while live clients continue reading NameCrane.
+if (location.hostname === 'license.nexapos.cc') {
+  document.getElementById('serverUrl').readOnly = true;
 }
 loadSuggestedVersion();
 
@@ -822,6 +828,9 @@ const PATCH_PUBLISH_FILES = [
 ];
 
 function serverUrl() {
+  if (location.hostname === 'license.nexapos.cc') {
+    return location.origin + '/index.php';
+  }
   return document.getElementById('serverUrl').value.trim();
 }
 function adminSecret() {
