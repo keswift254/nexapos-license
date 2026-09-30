@@ -1066,14 +1066,34 @@ if ($action === 'payment_done' && $method === 'GET') {
     while (ob_get_level() > 0) {
         ob_end_clean();
     }
+    $returnTarget = strtolower(trim((string) ($_GET['return'] ?? 'generic')));
+
+    // Browser purchases deliberately use the same tab (popup blockers cannot
+    // interfere), so send that tab straight back to the fixed NexaPOS web POS.
+    // Never reflect a client-supplied arbitrary URL here.
+    if ($returnTarget === 'web') {
+        $webPos = trim((string) ($licenseConfig['web_pos_url'] ?? 'https://nexapos.cc/app/'));
+        if (!preg_match('#^https://nexapos\.cc/app/?$#i', $webPos)) {
+            $webPos = 'https://nexapos.cc/app/';
+        }
+        header('Location: ' . rtrim($webPos, '/') . '/?payment_return=1', true, 302);
+        exit;
+    }
+
     header('Content-Type: text/html; charset=utf-8');
+    $nativeScript = $returnTarget === 'native'
+        ? '<script>setTimeout(function(){location.replace("nexapos://checkout-return");},80);</script>'
+        : '';
+    $nativeButton = $returnTarget === 'native'
+        ? '<p style="margin:18px 0 0;"><a href="nexapos://checkout-return" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:11px 18px;border-radius:9px;font-weight:600;">Return to NexaPOS</a></p>'
+        : '';
     echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
-        . '<title>NexaPOS</title></head><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f7f7fb;color:#14141f;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;">'
+        . '<title>NexaPOS</title>' . $nativeScript . '</head><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f7f7fb;color:#14141f;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;">'
         . '<div style="max-width:420px;margin:24px;background:#fff;border-radius:12px;padding:32px 24px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.08);">'
         . '<div style="width:44px;height:44px;background:#4f46e5;border-radius:12px;color:#fff;font-size:20px;font-weight:700;line-height:44px;margin:0 auto 14px;">N</div>'
-        . '<h1 style="font-size:20px;margin:0 0 10px;">Back to NexaPOS</h1>'
-        . '<p style="color:#55556b;font-size:15px;line-height:1.5;margin:0;">If your payment went through, NexaPOS activates itself within a few seconds. You can close this page and return to the app.</p>'
-        . '</div></body></html>';
+        . '<h1 style="font-size:20px;margin:0 0 10px;">Returning to NexaPOS</h1>'
+        . '<p style="color:#55556b;font-size:15px;line-height:1.5;margin:0;">NexaPOS checks your payment automatically and activates as soon as it is confirmed.</p>'
+        . $nativeButton . '</div></body></html>';
     exit;
 }
 
