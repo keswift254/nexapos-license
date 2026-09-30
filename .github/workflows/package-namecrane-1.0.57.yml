@@ -16,25 +16,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify deployment files
+      - name: Build DirectAdmin deployment bundle
         shell: bash
         run: |
           set -euo pipefail
-          test -f 'app/Services/Purchases.php'
-          test -f 'public/index.php'
-          test -f 'config/license.php'
+          test -f app/Services/Purchases.php
+          test -f public/index.php
+          test -f config/license.php
 
-      - name: Build deployment bundle
-        shell: bash
-        run: |
-          set -euo pipefail
           rm -rf package
-          mkdir -p "package/$(dirname 'app/Services/Purchases.php')"
-          cp 'app/Services/Purchases.php' "package/app/Services/Purchases.php"
-          mkdir -p "package/$(dirname 'public/index.php')"
-          cp 'public/index.php' "package/public/index.php"
-          mkdir -p "package/$(dirname 'config/license.php')"
-          cp 'config/license.php' "package/config/license.php"
+          mkdir -p package/app/Services package/config package/public_html
+          cp app/Services/Purchases.php package/app/Services/Purchases.php
+          cp config/license.php package/config/license.php
+          cp public/index.php package/public_html/index.php
+
           find package -type f -maxdepth 6 -print
 
       - uses: actions/upload-artifact@v4
