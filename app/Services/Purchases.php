@@ -96,6 +96,10 @@ final class Purchases
         $deviceId = trim((string) ($body['device_id'] ?? ''));
         $planId = trim((string) ($body['plan_id'] ?? ''));
         $email = strtolower(trim((string) ($body['email'] ?? '')));
+        $returnTarget = strtolower(trim((string) ($body['return_target'] ?? 'generic')));
+        if (!in_array($returnTarget, ['generic', 'native', 'web'], true)) {
+            $returnTarget = 'generic';
+        }
 
         if (preg_match('/^[\x21-\x7E]{1,64}$/', $deviceId) !== 1) {
             return [['success' => false, 'message' => 'A valid device_id is required.'], 422];
@@ -173,7 +177,8 @@ final class Purchases
                 'amount' => $amountMinor,
                 'currency' => 'KES',
                 'reference' => $reference,
-                'callback_url' => rtrim((string) ($this->config['public_base_url'] ?? ''), '?&') . '?action=payment_done',
+                'callback_url' => rtrim((string) ($this->config['public_base_url'] ?? ''), '?&')
+                    . '?action=payment_done&return=' . rawurlencode($returnTarget),
                 'metadata' => [
                     'product' => 'NexaPOS license',
                     'plan_id' => $planId,
