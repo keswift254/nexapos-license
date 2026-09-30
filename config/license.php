@@ -48,6 +48,9 @@ $config = [
     // This server's own public address: where Paystack sends the customer's
     // browser after paying (a "payment received" page), see payment_done.
     'public_base_url' => getenv('LICENSE_PUBLIC_BASE_URL') ?: 'https://license.nexapos.cc/index.php',
+    // Fixed, allow-listed return destination for purchases started by the web
+    // POS. Never accept an arbitrary URL from a client as a Paystack callback.
+    'web_pos_url' => getenv('NEXAPOS_WEB_POS_URL') ?: 'https://nexapos.cc/app/',
     // The app polls for its payment every few seconds; Paystack is asked at most
     // this often per purchase. (An override exists only so the tests need not wait.)
     'purchase_verify_every_seconds' => (int) (getenv('PURCHASE_VERIFY_EVERY_SECONDS') !== false ? getenv('PURCHASE_VERIFY_EVERY_SECONDS') : 2),
