@@ -15,9 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify deployment files
+        shell: bash
+        run: |
+          set -euo pipefail
           test -f 'app/Services/Purchases.php'
           test -f 'public/index.php'
           test -f 'config/license.php'
+
       - name: Build deployment bundle
         shell: bash
         run: |
@@ -30,6 +36,7 @@ jobs:
           mkdir -p "package/$(dirname 'config/license.php')"
           cp 'config/license.php' "package/config/license.php"
           find package -type f -maxdepth 6 -print
+
       - uses: actions/upload-artifact@v4
         with:
           name: NexaPOS-License-Backend-1.0.57-NameCrane
