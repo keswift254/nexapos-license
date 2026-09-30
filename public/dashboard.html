@@ -229,11 +229,11 @@
        last_seen_at is recent - see isRealActiveDevice/isDeviceOnline. -->
   <div class="card">
     <h2><span class="emoji">🟢</span> Online devices <span class="section-count" id="onlineCount"></span></h2>
-    <p class="section-sub">Checked in within the last 5 minutes. "Online for" is time since that last check-in, not a tracked session start - there's no continuous "online since" moment recorded server-side, only recency of the last authenticated call.</p>
+    <p class="section-sub">Checked in within the last 5 minutes. The timer starts when this dashboard first observes a device online and continues through check-ins. It resets if the device goes offline or this page is reopened.</p>
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Device label</th><th>Device ID</th><th>Shop</th><th>Online for</th>
+          <th>Device label</th><th>Device ID</th><th>Shop</th><th>Observed online for</th>
           <th>Activation code</th><th>Code status</th><th></th>
         </tr></thead>
         <tbody id="onlineRows"></tbody>
@@ -308,6 +308,7 @@ const ADMIN_SECRET_KEY = 'nexapos.dashboard.adminSecret';
 const ADMIN_SECRET_TTL_MS = 20 * 60 * 1000;
 
 let deviceRows = [];
+const onlineObservedAt = new Map();
 let tickInterval = null;
 let autoRefreshInterval = null;
 
@@ -490,6 +491,11 @@ function formatLastSeen(device) {
   return formatDuration(Math.max(0, Date.now() - lastSeen)) + ' ago';
 }
 
+function formatObservedOnline(device) {
+  const started = onlineObservedAt.get(device.device_id);
+  return started == null ? '0s' : formatDuration(Math.max(0, Date.now() - started));
+}
+
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -618,6 +624,15 @@ function renderRows() {
 
   const online = visible.filter(({ device }) => isDeviceOnline(device));
   const offline = visible.filter(({ device }) => isRealActiveDevice(device) && !isDeviceOnline(device));
+  // A heartbeat updates last_seen_at, but it must not restart the displayed
+  // time for a device that has stayed online during this dashboard session.
+  const onlineIds = new Set(online.map(({ device }) => device.device_id));
+  for (const id of onlineIds) {
+    if (!onlineObservedAt.has(id)) onlineObservedAt.set(id, Date.now());
+  }
+  for (const id of onlineObservedAt.keys()) {
+    if (!onlineIds.has(id)) onlineObservedAt.delete(id);
+  }
   const unregistered = visible.filter(({ device }) => isNeverRegistered(device));
   const disabled = visible.filter(({ device }) => isDisabledDevice(device));
 
@@ -635,7 +650,7 @@ function renderRows() {
         <td>${labelOf(device)}</td>
         <td class="mono">${escapeHtml(device.device_id)}</td>
         <td>${shopOf(device)}</td>
-        <td>${formatLastSeen(device)}</td>
+        <td>${formatObservedOnline(device)}</td>
         <td class="mono">${codeCell}</td>
         <td>${statusCell}</td>
         <td>${deleteButton(device)}</td>
