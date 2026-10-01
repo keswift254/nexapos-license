@@ -240,6 +240,77 @@
   .icon-btn svg { width: 13px; height: 13px; display: block; }
   .icon-btn.copied { color: var(--success-text); }
 
+  .support-row { cursor: pointer; }
+  .support-row td.subject { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill.pending { background: var(--warn-soft); color: var(--warn-text); }
+  .pill.closed { background: color-mix(in srgb, var(--muted) 16%, transparent); color: var(--muted); }
+
+  .secondary-btn {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--field-border);
+  }
+  .secondary-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--muted) 10%, transparent); color: var(--text); }
+
+  dialog#ticketDialog {
+    width: min(560px, 92vw);
+    max-height: 85vh;
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 0;
+    background: var(--card-bg);
+    color: var(--text);
+    box-shadow: var(--shadow-hover);
+  }
+  dialog#ticketDialog::backdrop { background: rgba(10, 11, 20, 0.55); }
+  .ticket-dialog-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--row-border);
+  }
+  .ticket-dialog-head h3 { margin: 2px 0 0; font-size: 15.5px; }
+  .ticket-thread {
+    padding: 16px 20px;
+    overflow-y: auto;
+    max-height: 42vh;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .ticket-msg {
+    max-width: 85%;
+    padding: 9px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .ticket-msg .ticket-msg-meta { font-size: 10.5px; color: var(--muted); margin-bottom: 3px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  .ticket-msg.customer { align-self: flex-start; background: color-mix(in srgb, var(--muted) 12%, transparent); }
+  .ticket-msg.support { align-self: flex-end; background: var(--accent-soft); color: var(--accent-soft-text); }
+  .ticket-reply-row {
+    padding: 14px 20px 18px;
+    border-top: 1px solid var(--row-border);
+  }
+  .ticket-reply-row textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border: 1px solid var(--field-border);
+    border-radius: 10px;
+    font-size: 13.5px;
+    font-family: inherit;
+    resize: vertical;
+    background: var(--field-bg);
+    color: var(--text);
+    margin-bottom: 10px;
+  }
+  .ticket-reply-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
   .search-row { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 6px; }
   .search-row > div { flex: 1; }
   .search-row input { margin-bottom: 0; }
@@ -285,6 +356,28 @@
     </div>
     <div class="refresh-status" id="refreshStatus"></div>
   </div>
+
+  <!-- Support tickets: every shop's, not just one - loaded from
+       nexapos_platform with the same admin secret as everything else
+       here. A customer opens these from the app's Support screen; there
+       was previously no way at all to see or answer them. -->
+  <details class="card" id="supportSection" open>
+    <summary>
+      <h2><span class="emoji">🎧</span> Support tickets <span class="section-count" id="supportCount"></span></h2>
+      <span class="chevron">▸</span>
+    </summary>
+    <div class="card-body">
+      <p class="section-sub">Opened from the app's Support screen. Open = waiting on you; Pending = you've replied, waiting on the customer; Closed = done. Click a row to read the conversation and reply.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Shop</th><th>Subject</th><th>Status</th><th>Messages</th><th>Updated</th>
+          </tr></thead>
+          <tbody id="supportRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </details>
 
   <!-- Joined shops: one row per shop_id seen across deviceRows, grouping
        the same data the device sections below already show rather than
@@ -390,6 +483,28 @@
     </div>
   </details>
 
+  <!-- Support ticket thread + reply - a native <dialog> rather than
+       another section on the page, since reading a conversation and
+       replying to it needs room and focus a table row can't give it. -->
+  <dialog id="ticketDialog">
+    <div class="ticket-dialog-head">
+      <div>
+        <div class="meta" id="ticketDialogShop"></div>
+        <h3 id="ticketDialogSubject"></h3>
+      </div>
+      <button type="button" class="icon-btn" id="ticketDialogClose" title="Close" aria-label="Close" onclick="closeTicketDialog()">✕</button>
+    </div>
+    <div class="ticket-thread" id="ticketThread"></div>
+    <div class="ticket-reply-row">
+      <textarea id="ticketReplyText" rows="3" placeholder="Reply to this shop..."></textarea>
+      <div class="ticket-reply-actions">
+        <button type="button" id="ticketResolveBtn" class="secondary-btn" onclick="resolveTicket()">Mark resolved</button>
+        <button type="button" id="ticketReplyBtn" onclick="sendTicketReply()">Send reply</button>
+      </div>
+      <div class="msg err" id="ticketReplyMsg"></div>
+    </div>
+  </dialog>
+
 <script>
 // A device counts as online if it's authenticated within this window -
 // every authenticated call (sync included, which the app runs every 2
@@ -415,6 +530,8 @@ const COPY_ICON_SVG = '<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3
 const CHECK_ICON_SVG = '<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 8.5l3 3 7-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 let deviceRows = [];
+let supportTickets = [];
+let openTicketId = null;
 const onlineObservedAt = new Map();
 let tickInterval = null;
 let autoRefreshInterval = null;
@@ -466,15 +583,20 @@ async function loadDashboard() {
     const platformUrl = document.getElementById('platformUrl').value.trim();
     const licenseUrl = document.getElementById('licenseUrl').value.trim();
 
-    const [devicesRes, licensesRes] = await Promise.all([
+    const [devicesRes, licensesRes, ticketsRes] = await Promise.all([
       fetch(platformUrl + '?action=list_all_devices', { headers: { 'X-Admin-Secret': secret } }),
       fetch(licenseUrl + '?action=list_licenses', { headers: { 'X-Admin-Secret': secret } }),
+      fetch(platformUrl + '?action=admin_list_support_tickets', { headers: { 'X-Admin-Secret': secret } }),
     ]);
     const devicesData = await devicesRes.json();
     const licensesData = await licensesRes.json();
+    const ticketsData = await ticketsRes.json();
 
     if (!devicesData.success) throw new Error(devicesData.message || 'Could not load devices from nexapos_platform.');
     if (!licensesData.success) throw new Error(licensesData.message || 'Could not load licenses from nexapos_license.');
+    if (!ticketsData.success) throw new Error(ticketsData.message || 'Could not load support tickets from nexapos_platform.');
+    supportTickets = ticketsData.tickets;
+    renderSupportTickets();
 
     // Devices drive most of the table (a device exists here the instant
     // it registers, license or not) - license info is looked up per
@@ -744,6 +866,138 @@ function renderShopRows(visible) {
   }).join('');
 }
 
+const SUPPORT_STATUS_LABEL = { open: 'Open', pending: 'Pending', closed: 'Closed' };
+
+function renderSupportTickets() {
+  document.getElementById('supportCount').textContent = `(${supportTickets.length})`;
+  if (supportTickets.length === 0) {
+    renderEmptyRow('supportRows', 5, 'No support tickets yet.');
+    return;
+  }
+  document.getElementById('supportRows').innerHTML = supportTickets.map((ticket) => {
+    const updated = parseServerDate(ticket.updated_at);
+    const updatedText = updated === null ? '-' : formatDuration(Math.max(0, Date.now() - updated)) + ' ago';
+    return `<tr class="support-row" onclick="openTicketThread(${ticket.id})">
+      <td>${escapeHtml(ticket.business_name || ('Shop #' + ticket.shop_id))}</td>
+      <td class="subject">${escapeHtml(ticket.subject)}</td>
+      <td><span class="pill ${ticket.status}">${SUPPORT_STATUS_LABEL[ticket.status] || ticket.status}</span></td>
+      <td>${ticket.message_count}</td>
+      <td>${updatedText}</td>
+    </tr>`;
+  }).join('');
+  // The open dialog, if any, shows live data - a background auto-refresh
+  // must not go stale while the admin is mid-read of a ticket, but also
+  // must not fight a reply that's still being typed by re-rendering the
+  // reply textarea out from under them.
+  if (openTicketId !== null) refreshOpenTicketThread();
+}
+
+async function openTicketThread(ticketId) {
+  openTicketId = ticketId;
+  const dialog = document.getElementById('ticketDialog');
+  document.getElementById('ticketReplyText').value = '';
+  document.getElementById('ticketReplyMsg').className = 'msg err';
+  if (typeof dialog.showModal === 'function') dialog.showModal();
+  await refreshOpenTicketThread();
+}
+
+async function refreshOpenTicketThread() {
+  if (openTicketId === null) return;
+  const ticketId = openTicketId;
+  const secret = adminSecret();
+  const platformUrl = document.getElementById('platformUrl').value.trim();
+  try {
+    const res = await fetch(platformUrl + '?action=admin_support_thread&ticket_id=' + ticketId, {
+      headers: { 'X-Admin-Secret': secret },
+    });
+    const data = await res.json();
+    if (openTicketId !== ticketId) return; // closed/switched while this was in flight
+    if (!data.success) {
+      document.getElementById('ticketThread').innerHTML = `<p class="section-sub">${escapeHtml(data.message || 'Could not load this ticket.')}</p>`;
+      return;
+    }
+    const { ticket, messages } = data;
+    document.getElementById('ticketDialogShop').textContent =
+      (ticket.business_name || ('Shop #' + ticket.shop_id)) + ' · ' + (SUPPORT_STATUS_LABEL[ticket.status] || ticket.status);
+    document.getElementById('ticketDialogSubject').textContent = ticket.subject;
+    document.getElementById('ticketThread').innerHTML = messages.map((m) => `
+      <div class="ticket-msg ${m.sender === 'support' ? 'support' : 'customer'}">
+        <div class="ticket-msg-meta">${m.sender === 'support' ? 'You' : 'Customer'} · ${escapeHtml(m.created_at)}</div>
+        ${escapeHtml(m.body)}
+      </div>
+    `).join('') || '<p class="section-sub">No messages yet.</p>';
+    document.getElementById('ticketResolveBtn').disabled = ticket.status === 'closed';
+    document.getElementById('ticketResolveBtn').textContent = ticket.status === 'closed' ? 'Resolved' : 'Mark resolved';
+    // Update the row in the background list too, without waiting for the
+    // next 5s auto-refresh - otherwise the list looks stale right after
+    // replying even though the thread the admin is looking at just changed.
+    const row = supportTickets.find((t) => t.id === ticketId);
+    if (row) { row.status = ticket.status; row.message_count = messages.length; }
+  } catch (e) {
+    document.getElementById('ticketThread').innerHTML = `<p class="section-sub">Could not reach the server: ${escapeHtml(String(e))}</p>`;
+  }
+}
+
+function closeTicketDialog() {
+  openTicketId = null;
+  const dialog = document.getElementById('ticketDialog');
+  if (typeof dialog.close === 'function') dialog.close();
+  renderSupportTickets();
+}
+
+async function sendTicketReply() {
+  if (openTicketId === null) return;
+  const message = document.getElementById('ticketReplyText').value.trim();
+  if (!message) {
+    showMsg('ticketReplyMsg', 'Type a reply first.');
+    return;
+  }
+  const btn = document.getElementById('ticketReplyBtn');
+  btn.disabled = true;
+  showMsg('ticketReplyMsg', '');
+  try {
+    const secret = adminSecret();
+    const platformUrl = document.getElementById('platformUrl').value.trim();
+    const res = await fetch(platformUrl + '?action=admin_support_reply', {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': secret, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket_id: openTicketId, message }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      showMsg('ticketReplyMsg', data.message || 'Could not send the reply.');
+      return;
+    }
+    document.getElementById('ticketReplyText').value = '';
+    await refreshOpenTicketThread();
+  } catch (e) {
+    showMsg('ticketReplyMsg', 'Could not reach the server: ' + e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function resolveTicket() {
+  if (openTicketId === null) return;
+  const secret = adminSecret();
+  const platformUrl = document.getElementById('platformUrl').value.trim();
+  try {
+    const res = await fetch(platformUrl + '?action=admin_close_support_ticket', {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': secret, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket_id: openTicketId }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      showMsg('ticketReplyMsg', data.message || 'Could not resolve this ticket.');
+      return;
+    }
+    await refreshOpenTicketThread();
+  } catch (e) {
+    showMsg('ticketReplyMsg', 'Could not reach the server: ' + e);
+  }
+}
+
 function renderRows() {
   const query = document.getElementById('search').value.trim().toLowerCase();
   const visible = deviceRows.filter(({ device, license }) => matchesSearch(device, license, query));
@@ -938,6 +1192,15 @@ async function revokeShop(shopId, name) {
 // A remembered, still-fresh secret loads the table immediately - no
 // reason to make the admin click "Load devices" again just because
 // they refreshed the page.
+// Escape (or any other way the dialog closes besides the explicit X
+// button) must still clear openTicketId - otherwise the next background
+// refresh keeps trying to update a dialog nobody is looking at, and the
+// support count/list behind it stays stuck mid-read.
+document.getElementById('ticketDialog').addEventListener('close', () => {
+  openTicketId = null;
+  renderSupportTickets();
+});
+
 if (restoreAdminSecret()) loadDashboard();
 </script>
 </body>
