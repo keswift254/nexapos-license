@@ -308,25 +308,45 @@
     </div>
   </details>
 
-  <!-- Joined devices: every device that has a real clients row (it has
-       registered/activated at some point), online or not - merged from
-       what used to be two always-open sections, collapsed by default so
-       the page opens short; the live count in the summary still shows
-       how many there are without expanding it. -->
-  <details class="card" id="joinedSection">
+  <!-- Online: a device only ever lands here if it has a real clients row
+       (i.e. it was actually registered/activated at some point) AND its
+       last_seen_at is recent - see isRealActiveDevice/isDeviceOnline. -->
+  <details class="card" id="onlineSection">
     <summary>
-      <h2><span class="emoji">📱</span> Joined devices <span class="section-count" id="joinedCount"></span></h2>
+      <h2><span class="emoji">🟢</span> Online devices <span class="section-count" id="onlineCount"></span></h2>
       <span class="chevron">▸</span>
     </summary>
     <div class="card-body">
-      <p class="section-sub">Registered and activated on nexapos_platform. "Online" means it has checked in within the last 5 minutes - every authenticated call (sync included, which the app runs every 2 minutes while open) counts.</p>
+      <p class="section-sub">Checked in within the last 5 minutes. The timer starts when this dashboard first observes a device online and continues through check-ins. It resets if the device goes offline or this page is reopened.</p>
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>Device label</th><th>Device ID</th><th>Shop</th><th>Status</th><th>Last seen</th>
+            <th>Device label</th><th>Device ID</th><th>Shop</th><th>Observed online for</th>
             <th>Activation code</th><th>Code status</th><th>Expires in</th><th></th>
           </tr></thead>
-          <tbody id="joinedRows"></tbody>
+          <tbody id="onlineRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+
+  <!-- Offline: same "must be a real, registered client" requirement as
+       Online - a device that was never activated/registered never
+       appears here, it belongs in Unregistered instead. -->
+  <details class="card" id="offlineSection">
+    <summary>
+      <h2><span class="emoji">⚪</span> Offline devices <span class="section-count" id="offlineCount"></span></h2>
+      <span class="chevron">▸</span>
+    </summary>
+    <div class="card-body">
+      <p class="section-sub">Previously activated and registered, but hasn't checked in within the last 5 minutes.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Device label</th><th>Device ID</th><th>Shop</th><th>Last seen</th>
+            <th>Activation code</th><th>Code status</th><th>Expires in</th><th></th>
+          </tr></thead>
+          <tbody id="offlineRows"></tbody>
         </table>
       </div>
     </div>
@@ -744,29 +764,39 @@ function renderRows() {
   const unregistered = visible.filter(({ device }) => isNeverRegistered(device));
   const disabled = visible.filter(({ device }) => isDisabledDevice(device));
 
-  document.getElementById('joinedCount').textContent =
-    `(${online.length + offline.length} - ${online.length} online, ${offline.length} offline)`;
+  document.getElementById('onlineCount').textContent = `(${online.length})`;
+  document.getElementById('offlineCount').textContent = `(${offline.length})`;
   document.getElementById('unregisteredCount').textContent = `(${unregistered.length})`;
   document.getElementById('disabledCount').textContent = `(${disabled.length})`;
 
-  // Joined devices: online devices first (most likely what the admin
-  // wants to check on), then offline, each keeping the order they already
-  // had (newest-registered first, from deviceRows' own sort).
-  const joined = [...online, ...offline];
-  if (joined.length === 0) {
-    renderEmptyRow('joinedRows', 9, 'No joined devices yet.');
+  if (online.length === 0) {
+    renderEmptyRow('onlineRows', 8, 'No online devices right now.');
   } else {
-    document.getElementById('joinedRows').innerHTML = joined.map(({ device, license }) => {
-      const online = isDeviceOnline(device);
+    document.getElementById('onlineRows').innerHTML = online.map(({ device, license }) => {
       const { codeCell, statusCell } = codeCells(license);
-      const statusPill = online ? '<span class="pill online">Online</span>' : '<span class="pill offline">Offline</span>';
-      const lastSeen = online ? 'Observed ' + formatObservedOnline(device) : formatLastSeen(device);
       return `<tr>
         <td>${labelOf(device)}</td>
         <td class="mono">${deviceIdCell(device.device_id)}</td>
         <td>${shopOf(device)}</td>
-        <td>${statusPill}</td>
-        <td>${lastSeen}</td>
+        <td>${formatObservedOnline(device)}</td>
+        <td class="mono">${codeCell}</td>
+        <td>${statusCell}</td>
+        <td>${codeExpiryCell(license)}</td>
+        <td>${deleteButton(device)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  if (offline.length === 0) {
+    renderEmptyRow('offlineRows', 8, 'No offline devices.');
+  } else {
+    document.getElementById('offlineRows').innerHTML = offline.map(({ device, license }) => {
+      const { codeCell, statusCell } = codeCells(license);
+      return `<tr>
+        <td>${labelOf(device)}</td>
+        <td class="mono">${deviceIdCell(device.device_id)}</td>
+        <td>${shopOf(device)}</td>
+        <td>${formatLastSeen(device)}</td>
         <td class="mono">${codeCell}</td>
         <td>${statusCell}</td>
         <td>${codeExpiryCell(license)}</td>
