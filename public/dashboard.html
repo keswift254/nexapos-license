@@ -496,6 +496,8 @@
     </div>
     <div class="ticket-thread" id="ticketThread"></div>
     <div class="ticket-reply-row">
+      <div id="ticketPhotoDrafts" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+      <label class="section-sub">Attach photos (up to 4, 2 MB each): <input id="ticketPhotoInput" type="file" accept="image/png,image/jpeg,image/webp" multiple></label>
       <textarea id="ticketReplyText" rows="3" placeholder="Reply to this shop..."></textarea>
       <div class="ticket-reply-actions">
         <button type="button" id="ticketResolveBtn" class="secondary-btn" onclick="resolveTicket()">Mark resolved</button>
@@ -892,10 +894,65 @@ function renderSupportTickets() {
   if (openTicketId !== null) refreshOpenTicketThread();
 }
 
+let ticketPhotos = [];
+let ticketThreadSignature = null;
+function clearTicketPhotos() {
+  ticketPhotos = [];
+  document.getElementById('ticketPhotoInput').value = '';
+  document.getElementById('ticketPhotoDrafts').replaceChildren();
+}
+async function addTicketPhotos(files) {
+  const list = Array.from(files);
+  if (ticketPhotos.length + list.length > 4 || list.some(f => f.size > 2097152 || !['image/png','image/jpeg','image/webp'].includes(f.type)) ||
+      ticketPhotos.reduce((n,p) => n+p.size, 0) + list.reduce((n,f) => n+f.size, 0) > 4194304) {
+    showMsg('ticketReplyMsg', 'Use up to 4 PNG/JPEG/WebP photos, 2 MB each and 4 MB total.'); return;
+  }
+  const ticketId = openTicketId;
+  for (const file of list) {
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader(); reader.onload = () => resolve(String(reader.result));
+      reader.onerror = reject; reader.readAsDataURL(file);
+    });
+    if (ticketId !== openTicketId) return;
+    ticketPhotos.push({data: data.split(',')[1], size: file.size, preview: data});
+  }
+  renderTicketPhotoDrafts();
+}
+function renderTicketPhotoDrafts() {
+  const container = document.getElementById('ticketPhotoDrafts'); container.replaceChildren();
+  ticketPhotos.forEach((photo, index) => {
+    const button = document.createElement('button'); button.type = 'button'; button.title = 'Remove photo';
+    const image = document.createElement('img'); image.src = photo.preview; image.alt = 'Attached photo';
+    image.style.cssText = 'width:80px;height:80px;object-fit:cover'; button.append(image);
+    button.addEventListener('click', () => { ticketPhotos.splice(index,1); renderTicketPhotoDrafts(); }); container.append(button);
+  });
+}
+document.getElementById('ticketPhotoInput').addEventListener('change', e => addTicketPhotos(e.target.files).catch(() => showMsg('ticketReplyMsg','Could not read the photo.')));
+document.getElementById('ticketReplyText').addEventListener('paste', e => {
+  const photos = Array.from(e.clipboardData?.files || []).filter(file => file.type.startsWith('image/'));
+  if (photos.length) { e.preventDefault(); addTicketPhotos(photos).catch(() => showMsg('ticketReplyMsg','Could not paste the photo.')); }
+});
+async function loadSupportPhoto(button) {
+  button.disabled = true; button.textContent = 'Loading photo…';
+  try {
+    const url = new URL(document.getElementById('platformUrl').value.trim());
+    url.search = new URLSearchParams({action:'admin_support_attachment',id:button.dataset.supportPhoto});
+    const response = await fetch(url, {headers: {'X-Admin-Secret': adminSecret()}});
+    if (!response.ok || !(response.headers.get('Content-Type') || '').startsWith('image/')) throw new Error('Photo unavailable');
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const image = document.createElement('img'); image.alt = 'Support photo'; image.src = objectUrl;
+    image.style.cssText = 'max-width:100%;max-height:500px;object-fit:contain;display:block;margin-top:8px';
+    image.onload = image.onerror = () => URL.revokeObjectURL(objectUrl);
+    button.replaceWith(image);
+  } catch (_) { button.disabled = false; button.textContent = 'Retry photo'; }
+}
+
 async function openTicketThread(ticketId) {
   openTicketId = ticketId;
+  ticketThreadSignature = null;
   const dialog = document.getElementById('ticketDialog');
   document.getElementById('ticketReplyText').value = '';
+  clearTicketPhotos();
   document.getElementById('ticketReplyMsg').className = 'msg err';
   if (typeof dialog.showModal === 'function') dialog.showModal();
   await refreshOpenTicketThread();
@@ -917,6 +974,9 @@ async function refreshOpenTicketThread() {
       return;
     }
     const { ticket, messages } = data;
+    const signature = JSON.stringify([ticket, messages]);
+    if (signature === ticketThreadSignature) return;
+    ticketThreadSignature = signature;
     document.getElementById('ticketDialogShop').textContent =
       (ticket.business_name || ('Shop #' + ticket.shop_id)) + ' · ' + (SUPPORT_STATUS_LABEL[ticket.status] || ticket.status);
     document.getElementById('ticketDialogSubject').textContent = ticket.subject;
@@ -924,8 +984,10 @@ async function refreshOpenTicketThread() {
       <div class="ticket-msg ${m.sender === 'support' ? 'support' : 'customer'}">
         <div class="ticket-msg-meta">${m.sender === 'support' ? 'You' : 'Customer'} · ${escapeHtml(m.created_at)}</div>
         ${escapeHtml(m.body)}
+        <div>${(m.attachments || []).map(a => `<button type="button" data-support-photo="${Number(a.id)}">View photo</button>`).join('')}</div>
       </div>
     `).join('') || '<p class="section-sub">No messages yet.</p>';
+    document.querySelectorAll('[data-support-photo]').forEach(button => button.addEventListener('click', () => loadSupportPhoto(button)));
     document.getElementById('ticketResolveBtn').disabled = ticket.status === 'closed';
     document.getElementById('ticketResolveBtn').textContent = ticket.status === 'closed' ? 'Resolved' : 'Mark resolved';
     // Update the row in the background list too, without waiting for the
@@ -948,8 +1010,8 @@ function closeTicketDialog() {
 async function sendTicketReply() {
   if (openTicketId === null) return;
   const message = document.getElementById('ticketReplyText').value.trim();
-  if (!message) {
-    showMsg('ticketReplyMsg', 'Type a reply first.');
+  if (!message && !ticketPhotos.length) {
+    showMsg('ticketReplyMsg', 'Type a reply or attach a photo.');
     return;
   }
   const btn = document.getElementById('ticketReplyBtn');
@@ -961,7 +1023,7 @@ async function sendTicketReply() {
     const res = await fetch(platformUrl + '?action=admin_support_reply', {
       method: 'POST',
       headers: { 'X-Admin-Secret': secret, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticket_id: openTicketId, message }),
+      body: JSON.stringify({ ticket_id: openTicketId, message, attachments: ticketPhotos.map(photo => ({data: photo.data})) }),
     });
     const data = await res.json();
     if (!data.success) {
@@ -969,6 +1031,7 @@ async function sendTicketReply() {
       return;
     }
     document.getElementById('ticketReplyText').value = '';
+    clearTicketPhotos();
     await refreshOpenTicketThread();
   } catch (e) {
     showMsg('ticketReplyMsg', 'Could not reach the server: ' + e);
