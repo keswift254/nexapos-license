@@ -1,0 +1,34 @@
+name: Package NameCrane 1.0.59 dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/package-namecrane-1.0.59.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build DirectAdmin deployment bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f public/dashboard.html
+          rm -rf package
+          mkdir -p package/public_html
+          cp public/dashboard.html package/public_html/dashboard.html
+          find package -type f -maxdepth 3 -print
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexaPOS-License-Dashboard-1.0.59-NameCrane
+          path: package/
+          if-no-files-found: error
+          retention-days: 30
