@@ -1,0 +1,26 @@
+name: Verify production Support dashboard 1.0.59
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-production-1.0.59.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify live dashboard photo controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          curl -fsSL --max-time 30 'https://license.nexapos.cc/dashboard.html' -o "$body"
+          grep -q 'ticketPhotoInput' "$body"
+          grep -q 'admin_support_attachment' "$body"
+          grep -q 'Attach photos (up to 4' "$body"
+          echo 'VERIFIED 1.0.59 Support dashboard is live.'
