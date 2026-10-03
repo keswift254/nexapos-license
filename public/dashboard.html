@@ -585,20 +585,17 @@ async function loadDashboard() {
     const platformUrl = document.getElementById('platformUrl').value.trim();
     const licenseUrl = document.getElementById('licenseUrl').value.trim();
 
-    const [devicesRes, licensesRes, ticketsRes] = await Promise.all([
+    // Support should become usable even when the device or license query is slow.
+    refreshSupportTickets();
+    const [devicesRes, licensesRes] = await Promise.all([
       fetch(platformUrl + '?action=list_all_devices', { headers: { 'X-Admin-Secret': secret } }),
       fetch(licenseUrl + '?action=list_licenses', { headers: { 'X-Admin-Secret': secret } }),
-      fetch(platformUrl + '?action=admin_list_support_tickets', { headers: { 'X-Admin-Secret': secret } }),
     ]);
     const devicesData = await devicesRes.json();
     const licensesData = await licensesRes.json();
-    const ticketsData = await ticketsRes.json();
 
     if (!devicesData.success) throw new Error(devicesData.message || 'Could not load devices from nexapos_platform.');
     if (!licensesData.success) throw new Error(licensesData.message || 'Could not load licenses from nexapos_license.');
-    if (!ticketsData.success) throw new Error(ticketsData.message || 'Could not load support tickets from nexapos_platform.');
-    supportTickets = ticketsData.tickets;
-    renderSupportTickets();
 
     // Devices drive most of the table (a device exists here the instant
     // it registers, license or not) - license info is looked up per
@@ -661,6 +658,31 @@ async function loadDashboard() {
     showMsg('loadMsg', String(e.message || e));
   } finally {
     btn.disabled = false;
+  }
+}
+
+let supportRefreshInFlight = false;
+async function refreshSupportTickets() {
+  if (supportRefreshInFlight) return;
+  const secret = adminSecret();
+  if (!secret) return;
+  supportRefreshInFlight = true;
+  try {
+    const platformUrl = document.getElementById('platformUrl').value.trim();
+    const response = await fetch(platformUrl + '?action=admin_list_support_tickets', {
+      headers: { 'X-Admin-Secret': secret },
+    });
+    const data = await response.json();
+    if (!data.success || !Array.isArray(data.tickets)) {
+      throw new Error(data.message || 'Could not load support tickets.');
+    }
+    supportTickets = data.tickets;
+    renderSupportTickets();
+  } catch (error) {
+    document.getElementById('supportCount').textContent = '(unavailable)';
+    renderEmptyRow('supportRows', 5, 'Support tickets could not load. Refresh to retry.');
+  } finally {
+    supportRefreshInFlight = false;
   }
 }
 
@@ -881,7 +903,7 @@ function renderSupportTickets() {
     const updatedText = updated === null ? '-' : formatDuration(Math.max(0, Date.now() - updated)) + ' ago';
     return `<tr class="support-row" onclick="openTicketThread(${ticket.id})">
       <td>${escapeHtml(ticket.business_name || ('Shop #' + ticket.shop_id))}</td>
-      <td class="subject">${escapeHtml(ticket.subject)}</td>
+      <td class="subject">${escapeHtml(ticket.subject)}${Number(ticket.attachment_count) > 0 ? ` <small>· ${Number(ticket.attachment_count)} photo${Number(ticket.attachment_count) === 1 ? '' : 's'}</small>` : ''}</td>
       <td><span class="pill ${ticket.status}">${SUPPORT_STATUS_LABEL[ticket.status] || ticket.status}</span></td>
       <td>${ticket.message_count}</td>
       <td>${updatedText}</td>
@@ -908,14 +930,12 @@ async function addTicketPhotos(files) {
     showMsg('ticketReplyMsg', 'Use up to 4 PNG/JPEG/WebP photos, 2 MB each and 4 MB total.'); return;
   }
   const ticketId = openTicketId;
-  for (const file of list) {
-    const data = await new Promise((resolve, reject) => {
+  const photos = await Promise.all(list.map(file => new Promise((resolve, reject) => {
       const reader = new FileReader(); reader.onload = () => resolve(String(reader.result));
       reader.onerror = reject; reader.readAsDataURL(file);
-    });
-    if (ticketId !== openTicketId) return;
-    ticketPhotos.push({data: data.split(',')[1], size: file.size, preview: data});
-  }
+    }).then(data => ({data: data.split(',')[1], size: file.size, preview: data}))));
+  if (ticketId !== openTicketId) return;
+  ticketPhotos.push(...photos);
   renderTicketPhotoDrafts();
 }
 function renderTicketPhotoDrafts() {
@@ -980,14 +1000,21 @@ async function refreshOpenTicketThread() {
     document.getElementById('ticketDialogShop').textContent =
       (ticket.business_name || ('Shop #' + ticket.shop_id)) + ' · ' + (SUPPORT_STATUS_LABEL[ticket.status] || ticket.status);
     document.getElementById('ticketDialogSubject').textContent = ticket.subject;
-    document.getElementById('ticketThread').innerHTML = messages.map((m) => `
+     const returnedPhotoCount = messages.reduce((count, message) => count + (message.attachments || []).length, 0);
+     const listedPhotoCount = Number(supportTickets.find(row => row.id === ticketId)?.attachment_count || 0);
+     document.getElementById('ticketThread').innerHTML = (listedPhotoCount > 0 && returnedPhotoCount === 0
+       ? '<p class="section-sub">This ticket has photos, but the support server did not return their details. Refresh the page; if they are still missing, check that the dashboard points to the current sync API.</p>'
+       : '') + messages.map((m) => `
       <div class="ticket-msg ${m.sender === 'support' ? 'support' : 'customer'}">
         <div class="ticket-msg-meta">${m.sender === 'support' ? 'You' : 'Customer'} · ${escapeHtml(m.created_at)}</div>
         ${escapeHtml(m.body)}
         <div>${(m.attachments || []).map(a => `<button type="button" data-support-photo="${Number(a.id)}">View photo</button>`).join('')}</div>
       </div>
     `).join('') || '<p class="section-sub">No messages yet.</p>';
-    document.querySelectorAll('[data-support-photo]').forEach(button => button.addEventListener('click', () => loadSupportPhoto(button)));
+     document.querySelectorAll('[data-support-photo]').forEach(button => {
+       button.addEventListener('click', () => loadSupportPhoto(button));
+       loadSupportPhoto(button);
+     });
     document.getElementById('ticketResolveBtn').disabled = ticket.status === 'closed';
     document.getElementById('ticketResolveBtn').textContent = ticket.status === 'closed' ? 'Resolved' : 'Mark resolved';
     // Update the row in the background list too, without waiting for the
