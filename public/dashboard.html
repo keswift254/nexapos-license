@@ -1327,6 +1327,18 @@ function closeTicketDialog() {
   renderSupportTickets();
 }
 
+// The short "message sent" sound (message-sent.mp3, next to this page), played once the server has
+// the reply. A browser that refuses to play sound simply stays quiet.
+const sentSound = new Audio('message-sent.mp3');
+sentSound.preload = 'auto';
+function playSentSound() {
+  try {
+    sentSound.currentTime = 0;
+    const playing = sentSound.play();
+    if (playing && playing.catch) playing.catch(() => {});
+  } catch (_) { /* no sound is better than a failed reply */ }
+}
+
 async function sendTicketReply() {
   if (openTicketId === null) return;
   const message = document.getElementById('ticketReplyText').value.trim();
@@ -1350,6 +1362,7 @@ async function sendTicketReply() {
       showMsg('ticketReplyMsg', data.message || 'Could not send the reply.');
       return;
     }
+    playSentSound();
     document.getElementById('ticketReplyText').value = '';
     clearTicketPhotos();
     setReplyTarget(null);
