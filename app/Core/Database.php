@@ -249,7 +249,9 @@ class Database
             // succeed and negotiate real TLS 1.3, confirmed via SHOW
             // STATUS LIKE 'Ssl_cipher'). Traffic is still encrypted;
             // only strict cert-pinning is skipped.
-            $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
+            if (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT')) {
+                $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
+            }
         }
         return new PDO($dsn, $db['user'], $db['pass'], $options);
     }
