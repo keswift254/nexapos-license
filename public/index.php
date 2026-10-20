@@ -145,6 +145,15 @@ set_exception_handler(function (\Throwable $e): void {
     jsonResponse(['success' => false, 'message' => 'Server error.'], 500);
 });
 
+// Planned maintenance, e.g. moving the database: while config/maintenance.flag exists
+// every request answers 503 BEFORE the database is touched. Clients treat 503 as "try
+// again later", never as "recorded", so nothing can be written to a database that is
+// being copied. Delete the file to go live again.
+if (is_file(__DIR__ . '/../config/maintenance.flag')) {
+    header('Retry-After: 120');
+    jsonResponse(['success' => false, 'message' => 'NexaPOS is being upgraded. Please try again in a few minutes.'], 503);
+}
+
 $pdo = Database::connection();
 $licenseConfig = require __DIR__ . '/../config/license.php';
 $action = (string) ($_GET['action'] ?? '');

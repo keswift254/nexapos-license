@@ -82,6 +82,19 @@ check "plans: ... but the plans are still listed" "$r" '"amount_kes":3000'
 r=$(curl -s -X POST "$OFF?action=checkout_start" -H "Content-Type: application/json" -H "CF-Connecting-IP: $TEST_IP" -d '{"device_id":"dev-off","plan_id":"m3","email":"a@b.co"}')
 check "start with no Paystack key -> 503 with a clear message" "$r" "not available yet"
 
+section "maintenance switch (moving the database)"
+FLAG="$LIC/config/maintenance.flag"
+echo test > "$FLAG"
+code=$(curl -s -o /dev/null -w "%{http_code}" "$LI?action=plans")
+check "while config/maintenance.flag exists every request answers 503" "$code" "503"
+r=$(curl -s -X POST "$LI?action=checkout_start" -H "Content-Type: application/json" -H "CF-Connecting-IP: $TEST_IP" -d '{"device_id":"dev-maint","plan_id":"m3","email":"m@m.co"}')
+check "a write during maintenance is refused with a clear message" "$r" "being upgraded"
+n=$("$MYSQL" -uroot -N -e "SELECT COUNT(*) FROM $DB.license_purchases WHERE device_id='dev-maint'")
+check "nothing was recorded during maintenance" "$n" "0"
+rm -f "$FLAG"
+code=$(curl -s -o /dev/null -w "%{http_code}" "$LI?action=plans")
+check "removing the file restores service at once" "$code" "200"
+
 section "start: validation"
 r=$(post checkout_start '{"plan_id":"m3","email":"a@b.co"}');                          check "no device -> rejected" "$r" "device_id is required"
 r=$(post checkout_start '{"device_id":"d1","plan_id":"nope","email":"a@b.co"}');       check "unknown plan -> rejected" "$r" "Choose one of the listed plans"
