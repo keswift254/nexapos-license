@@ -298,6 +298,7 @@
   .chat-row.support { align-self: flex-end; align-items: flex-end; }
   .chat-row.customer { align-self: flex-start; align-items: flex-start; }
   .chat-row .ticket-msg { max-width: 100%; box-sizing: border-box; user-select: text; }
+  .ticket-delivery { margin: 4px 3px 0; font-size: 11px; color: var(--muted); }
   .chat-row.flash .ticket-msg { outline: 2px solid color-mix(in srgb, rgb(0, 120, 254) 70%, transparent); outline-offset: 2px; }
   .ticket-quote {
     border-left: 3px solid currentColor;
@@ -1142,6 +1143,7 @@ let ticketMessages = [];
 let messageMenu = null;
 
 function messageWho(sender) { return sender === 'support' ? 'You' : 'Customer'; }
+function supportDeliveryLabel(message) { return message.read_at ? 'Read' : 'Delivered'; }
 function messageSnippet(m) { return (m.body || '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Photo'; }
 
 function setReplyTarget(m) {
@@ -1239,7 +1241,10 @@ function renderTicketMessages(messages, firstRender, noteHtml = '') {
           return `<button type="button" class="reaction-chip${own ? ' mine' : ''}" data-react="${Number(m.id)}" data-emoji="${escapeHtml(r.emoji)}" data-own="${own ? 1 : 0}" title="${own ? 'Your reaction - click to remove it' : 'The customer\'s reaction - click to react the same'}">${escapeHtml(r.emoji)}</button>`;
         }).join('')}</div>`
       : '';
-    return `<div class="chat-row ${mine ? 'support' : 'customer'}" data-row="${Number(m.id)}"><div class="ticket-msg ${mine ? 'support' : 'customer'}" data-msg="${Number(m.id)}"${deviceTitle}>${quote}<div class="ticket-msg-meta">${messageWho(m.sender)}${device} · ${escapeHtml(m.created_at)}</div>${m.body ? `<div class="ticket-body">${escapeHtml(m.body)}</div>` : ''}${photos}</div>${reactions}</div>`;
+    const delivery = mine
+      ? `<div class="ticket-delivery" title="${m.read_at ? 'Opened by the shop at ' + escapeHtml(m.read_at) : 'Accepted by the support server; not yet opened by the shop'}">${supportDeliveryLabel(m)}</div>`
+      : '';
+    return `<div class="chat-row ${mine ? 'support' : 'customer'}" data-row="${Number(m.id)}"><div class="ticket-msg ${mine ? 'support' : 'customer'}" data-msg="${Number(m.id)}"${deviceTitle}>${quote}<div class="ticket-msg-meta">${messageWho(m.sender)}${device} · ${escapeHtml(m.created_at)}</div>${m.body ? `<div class="ticket-body">${escapeHtml(m.body)}</div>` : ''}${photos}</div>${reactions}${delivery}</div>`;
   }).join('') || '<p class="section-sub">No messages yet.</p>';
 
   thread.querySelectorAll('.ticket-msg[data-msg]').forEach(bubble => bubble.addEventListener('dblclick', (e) => {
