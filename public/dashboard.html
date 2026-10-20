@@ -281,17 +281,129 @@
     gap: 10px;
   }
   .ticket-msg {
-    max-width: 85%;
+    max-width: 100%;
     padding: 9px 12px;
     border-radius: 12px;
     font-size: 13px;
     line-height: 1.45;
-    white-space: pre-wrap;
     word-break: break-word;
   }
   .ticket-msg .ticket-msg-meta { font-size: 10.5px; color: var(--muted); margin-bottom: 3px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
-  .ticket-msg.customer { align-self: flex-start; background: color-mix(in srgb, var(--muted) 12%, transparent); }
-  .ticket-msg.support { align-self: flex-end; background: var(--accent-soft); color: var(--accent-soft-text); }
+  .ticket-msg.customer { background: color-mix(in srgb, var(--muted) 14%, transparent); }
+  /* The vendor's own messages: iMessage blue, rgb(0, 120, 254). */
+  .ticket-msg.support { background: rgb(0, 120, 254); color: #fff; }
+  .ticket-msg.support .ticket-msg-meta { color: rgba(255, 255, 255, 0.8); }
+  .ticket-body { white-space: pre-wrap; word-break: break-word; }
+  .chat-row { display: flex; flex-direction: column; max-width: 85%; }
+  .chat-row.support { align-self: flex-end; align-items: flex-end; }
+  .chat-row.customer { align-self: flex-start; align-items: flex-start; }
+  .chat-row .ticket-msg { max-width: 100%; box-sizing: border-box; user-select: text; }
+  .chat-row.flash .ticket-msg { outline: 2px solid color-mix(in srgb, rgb(0, 120, 254) 70%, transparent); outline-offset: 2px; }
+  .ticket-quote {
+    border-left: 3px solid currentColor;
+    padding: 2px 8px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    line-height: 1.35;
+    opacity: 0.8;
+    cursor: pointer;
+    white-space: normal;
+  }
+  .ticket-quote b { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .ticket-quote-text { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .reaction-row { display: flex; gap: 4px; margin-top: -9px; padding: 0 8px; position: relative; z-index: 1; }
+  .reaction-chip {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 999px;
+    padding: 1px 6px;
+    font-size: 13px;
+    line-height: 1.4;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  }
+  .reaction-chip.mine { border-color: rgb(0, 120, 254); background: color-mix(in srgb, rgb(0, 120, 254) 14%, var(--card-bg)); }
+  .ticket-photo { display: block; max-width: 220px; max-height: 220px; border-radius: 10px; margin-top: 6px; cursor: zoom-in; object-fit: cover; }
+  .ticket-photo-slot { margin-top: 6px; font-size: 12px; opacity: 0.8; }
+  .ticket-photo-slot button { font-size: 12px; padding: 3px 8px; }
+  .msg-menu {
+    position: absolute;
+    z-index: 20;
+    min-width: 190px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    box-shadow: var(--shadow-hover);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .msg-menu-emojis { display: flex; gap: 2px; padding: 2px 2px 6px; border-bottom: 1px solid var(--row-border); margin-bottom: 4px; }
+  .msg-menu button { background: transparent; color: var(--text); border: 0; border-radius: 8px; cursor: pointer; font-size: 13px; text-align: left; padding: 7px 10px; }
+  .msg-menu .msg-menu-emojis button { font-size: 21px; padding: 3px 6px; border-radius: 999px; line-height: 1.2; }
+  .msg-menu button:hover { background: color-mix(in srgb, var(--muted) 14%, transparent); }
+  .msg-menu .msg-menu-emojis button.chosen { background: color-mix(in srgb, rgb(0, 120, 254) 22%, transparent); }
+  .reply-preview {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-left: 3px solid rgb(0, 120, 254);
+    background: color-mix(in srgb, var(--muted) 10%, transparent);
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    font-size: 12.5px;
+  }
+  .reply-preview[hidden] { display: none; }
+  .reply-preview > div { flex: 1; min-width: 0; }
+  .reply-preview b { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: rgb(0, 120, 254); }
+  .reply-preview span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .reply-preview button { background: transparent; color: var(--muted); border: 0; cursor: pointer; font-size: 15px; padding: 2px 6px; }
+  .draft-photos { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .draft-photos:empty { display: none; }
+  .draft-photo { position: relative; width: 84px; height: 84px; }
+  .draft-photo img { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; cursor: zoom-in; display: block; }
+  .draft-photo .draft-remove {
+    position: absolute;
+    top: -7px;
+    right: -7px;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1.5px solid var(--card-bg);
+    background: #1c1c1e;
+    color: #fff;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .composer { position: relative; margin-bottom: 10px; }
+  .composer textarea { margin-bottom: 0; padding-left: 44px; display: block; }
+  .composer-plus {
+    position: absolute;
+    left: 8px;
+    bottom: 9px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 50%;
+    border: 0;
+    background: color-mix(in srgb, var(--muted) 20%, transparent);
+    color: var(--text);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .composer-plus:hover:not(:disabled) { background: color-mix(in srgb, rgb(0, 120, 254) 30%, transparent); }
+  dialog#photoLightbox { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 96vh; overflow: auto; }
+  dialog#photoLightbox::backdrop { background: rgba(0, 0, 0, 0.86); }
+  dialog#photoLightbox img { display: block; max-width: 94vw; max-height: 88vh; object-fit: contain; border-radius: 8px; cursor: zoom-in; margin: 0 auto; }
+  dialog#photoLightbox img.zoomed { max-width: none; max-height: none; cursor: zoom-out; }
+  .lightbox-bar { position: sticky; top: 0; display: flex; justify-content: flex-end; gap: 10px; padding: 6px 4px; }
+  .lightbox-bar a, .lightbox-bar button { background: rgba(255, 255, 255, 0.16); color: #fff; border: 0; border-radius: 999px; padding: 6px 14px; font-size: 13px; text-decoration: none; cursor: pointer; }
+  .lightbox-bar a:hover, .lightbox-bar button:hover { background: rgba(255, 255, 255, 0.3); }
   .ticket-reply-row {
     padding: 14px 20px 18px;
     border-top: 1px solid var(--row-border);
@@ -491,20 +603,37 @@
       <div>
         <div class="meta" id="ticketDialogShop"></div>
         <h3 id="ticketDialogSubject"></h3>
+        <div class="meta" id="ticketDialogDevice"></div>
       </div>
       <button type="button" class="icon-btn" id="ticketDialogClose" title="Close" aria-label="Close" onclick="closeTicketDialog()">✕</button>
     </div>
     <div class="ticket-thread" id="ticketThread"></div>
     <div class="ticket-reply-row">
-      <div id="ticketPhotoDrafts" style="display:flex;gap:8px;flex-wrap:wrap"></div>
-      <label class="section-sub">Attach photos (up to 4, 2 MB each): <input id="ticketPhotoInput" type="file" accept="image/png,image/jpeg,image/webp" multiple></label>
-      <textarea id="ticketReplyText" rows="3" placeholder="Reply to this shop..."></textarea>
+      <div id="replyPreview" class="reply-preview" hidden>
+        <div><b id="replyPreviewWho"></b><span id="replyPreviewText"></span></div>
+        <button type="button" id="replyPreviewClose" title="Cancel reply" aria-label="Cancel reply">✕</button>
+      </div>
+      <div id="ticketPhotoDrafts" class="draft-photos"></div>
+      <div class="composer">
+        <button type="button" class="composer-plus" id="ticketAttachBtn" title="Add photos (or copy a picture and press Ctrl+V)" aria-label="Add photos">+</button>
+        <input id="ticketPhotoInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+        <textarea id="ticketReplyText" rows="3" placeholder="Reply to this shop..."></textarea>
+      </div>
       <div class="ticket-reply-actions">
         <button type="button" id="ticketResolveBtn" class="secondary-btn" onclick="resolveTicket()">Mark resolved</button>
         <button type="button" id="ticketReplyBtn" onclick="sendTicketReply()">Send reply</button>
       </div>
       <div class="msg err" id="ticketReplyMsg"></div>
     </div>
+  </dialog>
+
+  <!-- A photo, full size: click it to zoom, Esc or the backdrop to close. -->
+  <dialog id="photoLightbox">
+    <div class="lightbox-bar">
+      <a id="lightboxDownload" download="support-photo">Download</a>
+      <button type="button" id="lightboxClose">Close ✕</button>
+    </div>
+    <img id="lightboxImage" alt="Photo">
   </dialog>
 
 <script>
@@ -938,33 +1067,199 @@ async function addTicketPhotos(files) {
   ticketPhotos.push(...photos);
   renderTicketPhotoDrafts();
 }
+// The photos waiting to be sent: click one to see it full size, the round X takes it off.
 function renderTicketPhotoDrafts() {
   const container = document.getElementById('ticketPhotoDrafts'); container.replaceChildren();
   ticketPhotos.forEach((photo, index) => {
-    const button = document.createElement('button'); button.type = 'button'; button.title = 'Remove photo';
-    const image = document.createElement('img'); image.src = photo.preview; image.alt = 'Attached photo';
-    image.style.cssText = 'width:80px;height:80px;object-fit:cover'; button.append(image);
-    button.addEventListener('click', () => { ticketPhotos.splice(index,1); renderTicketPhotoDrafts(); }); container.append(button);
+    const wrap = document.createElement('div'); wrap.className = 'draft-photo';
+    const image = document.createElement('img'); image.src = photo.preview; image.alt = 'Attached photo'; image.title = 'Click to preview';
+    image.addEventListener('click', () => openPhotoLightbox(photo.preview));
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'draft-remove';
+    remove.title = 'Remove photo'; remove.setAttribute('aria-label', 'Remove photo'); remove.textContent = '✕';
+    remove.addEventListener('click', () => { ticketPhotos.splice(index, 1); renderTicketPhotoDrafts(); });
+    wrap.append(image, remove); container.append(wrap);
   });
 }
-document.getElementById('ticketPhotoInput').addEventListener('change', e => addTicketPhotos(e.target.files).catch(() => showMsg('ticketReplyMsg','Could not read the photo.')));
+document.getElementById('ticketAttachBtn').addEventListener('click', () => document.getElementById('ticketPhotoInput').click());
+document.getElementById('ticketPhotoInput').addEventListener('change', e => {
+  addTicketPhotos(e.target.files).catch(() => showMsg('ticketReplyMsg','Could not read the photo.')).finally(() => { e.target.value = ''; });
+});
 document.getElementById('ticketReplyText').addEventListener('paste', e => {
   const photos = Array.from(e.clipboardData?.files || []).filter(file => file.type.startsWith('image/'));
   if (photos.length) { e.preventDefault(); addTicketPhotos(photos).catch(() => showMsg('ticketReplyMsg','Could not paste the photo.')); }
 });
-async function loadSupportPhoto(button) {
-  button.disabled = true; button.textContent = 'Loading photo…';
+
+// --- Photos in the conversation: loaded once each (kept for the life of the page), shown as
+// thumbnails, a click opens them full size.
+const supportPhotoUrls = new Map();
+function supportPhotoUrl(id) {
+  if (!supportPhotoUrls.has(id)) {
+    const loading = (async () => {
+      const url = new URL(document.getElementById('platformUrl').value.trim());
+      url.search = new URLSearchParams({action:'admin_support_attachment',id:String(id)});
+      const response = await fetch(url, {headers: {'X-Admin-Secret': adminSecret()}});
+      if (!response.ok || !(response.headers.get('Content-Type') || '').startsWith('image/')) throw new Error('Photo unavailable');
+      return URL.createObjectURL(await response.blob());
+    })();
+    loading.catch(() => supportPhotoUrls.delete(id));
+    supportPhotoUrls.set(id, loading);
+  }
+  return supportPhotoUrls.get(id);
+}
+async function showSupportPhoto(slot) {
+  slot.textContent = 'Loading photo…';
   try {
-    const url = new URL(document.getElementById('platformUrl').value.trim());
-    url.search = new URLSearchParams({action:'admin_support_attachment',id:button.dataset.supportPhoto});
-    const response = await fetch(url, {headers: {'X-Admin-Secret': adminSecret()}});
-    if (!response.ok || !(response.headers.get('Content-Type') || '').startsWith('image/')) throw new Error('Photo unavailable');
-    const objectUrl = URL.createObjectURL(await response.blob());
-    const image = document.createElement('img'); image.alt = 'Support photo'; image.src = objectUrl;
-    image.style.cssText = 'max-width:100%;max-height:500px;object-fit:contain;display:block;margin-top:8px';
-    image.onload = image.onerror = () => URL.revokeObjectURL(objectUrl);
-    button.replaceWith(image);
-  } catch (_) { button.disabled = false; button.textContent = 'Retry photo'; }
+    const src = await supportPhotoUrl(Number(slot.dataset.supportPhoto));
+    const image = document.createElement('img'); image.className = 'ticket-photo'; image.alt = 'Support photo'; image.title = 'Click to preview';
+    image.addEventListener('click', () => openPhotoLightbox(src));
+    // A photo arriving makes the conversation taller: stay on the newest message if that is where we were.
+    image.addEventListener('load', () => { if (threadPinned) { const thread = document.getElementById('ticketThread'); thread.scrollTop = thread.scrollHeight; } });
+    image.src = src;
+    slot.replaceWith(image);
+  } catch (_) {
+    slot.textContent = '';
+    const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = 'Retry photo';
+    retry.addEventListener('click', () => showSupportPhoto(slot));
+    slot.append(retry);
+  }
+}
+function openPhotoLightbox(src) {
+  const dialog = document.getElementById('photoLightbox');
+  const image = document.getElementById('lightboxImage');
+  image.classList.remove('zoomed'); image.src = src;
+  document.getElementById('lightboxDownload').href = src;
+  if (typeof dialog.showModal === 'function' && !dialog.open) dialog.showModal();
+}
+document.getElementById('lightboxImage').addEventListener('click', e => e.currentTarget.classList.toggle('zoomed'));
+document.getElementById('lightboxClose').addEventListener('click', () => document.getElementById('photoLightbox').close());
+document.getElementById('photoLightbox').addEventListener('click', e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+
+// --- Replying to a message, and reacting to one (double-click a message, like iMessage).
+const REACTION_CHOICES = ['❤️', '👍', '👎', '😂', '‼️', '❓'];
+const stripVariation = (emoji) => String(emoji).replace(/️/g, '');
+let replyTarget = null;
+let ticketMessages = [];
+let messageMenu = null;
+
+function messageWho(sender) { return sender === 'support' ? 'You' : 'Customer'; }
+function messageSnippet(m) { return (m.body || '').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Photo'; }
+
+function setReplyTarget(m) {
+  replyTarget = m ? { id: m.id, sender: m.sender, snippet: messageSnippet(m) } : null;
+  const bar = document.getElementById('replyPreview');
+  bar.hidden = !replyTarget;
+  if (replyTarget) {
+    document.getElementById('replyPreviewWho').textContent = 'Replying to ' + messageWho(replyTarget.sender);
+    document.getElementById('replyPreviewText').textContent = replyTarget.snippet;
+    document.getElementById('ticketReplyText').focus();
+  }
+}
+document.getElementById('replyPreviewClose').addEventListener('click', () => setReplyTarget(null));
+
+function closeMessageMenu() {
+  if (messageMenu) { messageMenu.remove(); messageMenu = null; }
+}
+function openMessageMenu(m, bubble) {
+  closeMessageMenu();
+  const dialog = document.getElementById('ticketDialog');
+  const mine = (m.reactions || []).find(r => r.sender === 'support');
+  const menu = document.createElement('div'); menu.className = 'msg-menu'; menu.setAttribute('role', 'menu');
+  const row = document.createElement('div'); row.className = 'msg-menu-emojis';
+  REACTION_CHOICES.forEach(emoji => {
+    const pick = document.createElement('button'); pick.type = 'button'; pick.textContent = emoji; pick.title = 'React';
+    if (mine && stripVariation(mine.emoji) === stripVariation(emoji)) pick.classList.add('chosen');
+    pick.addEventListener('click', () => {
+      closeMessageMenu();
+      reactToMessage(m.id, mine && stripVariation(mine.emoji) === stripVariation(emoji) ? '' : emoji);
+    });
+    row.append(pick);
+  });
+  const reply = document.createElement('button'); reply.type = 'button'; reply.textContent = '↩  Reply';
+  reply.addEventListener('click', () => { closeMessageMenu(); setReplyTarget(m); });
+  const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = '⧉  Copy text'; copy.disabled = !m.body;
+  copy.addEventListener('click', () => { closeMessageMenu(); navigator.clipboard?.writeText(m.body).catch(() => {}); });
+  menu.append(row, reply, copy);
+  dialog.append(menu);
+  // Above the bubble, lined up with the side it sits on; below it when there is no room above.
+  const d = dialog.getBoundingClientRect(), b = bubble.getBoundingClientRect(), width = menu.offsetWidth, height = menu.offsetHeight;
+  let top = b.top - d.top + dialog.scrollTop - height - 8;
+  if (top < 4) top = b.bottom - d.top + dialog.scrollTop + 8;
+  let left = (m.sender === 'support' ? b.right - width : b.left) - d.left + dialog.scrollLeft;
+  left = Math.max(6, Math.min(left, d.width - width - 6));
+  menu.style.top = top + 'px'; menu.style.left = left + 'px';
+  messageMenu = menu;
+}
+document.getElementById('ticketDialog').addEventListener('mousedown', e => { if (messageMenu && !messageMenu.contains(e.target)) closeMessageMenu(); });
+document.getElementById('ticketDialog').addEventListener('cancel', e => { if (messageMenu) { e.preventDefault(); closeMessageMenu(); } });
+
+async function reactToMessage(messageId, emoji) {
+  if (openTicketId === null) return;
+  try {
+    const platformUrl = document.getElementById('platformUrl').value.trim();
+    const res = await fetch(platformUrl + '?action=admin_support_react', {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': adminSecret(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket_id: openTicketId, message_id: messageId, emoji }),
+    });
+    const data = await res.json();
+    if (!data.success) { showMsg('ticketReplyMsg', data.message || 'Could not save the reaction.'); return; }
+    ticketThreadSignature = null;
+    await refreshOpenTicketThread();
+  } catch (e) {
+    showMsg('ticketReplyMsg', 'Could not reach the server: ' + e);
+  }
+}
+
+// "Pinned" = the reader is at the newest message, so a new message or a photo that finishes
+// loading keeps them there. Only the reader's own scrolling changes it (not the page's layout
+// shifting under them), hence the check for a recent wheel/touch/key/mouse press.
+let threadPinned = true;
+let lastReaderScroll = 0;
+const threadEl = document.getElementById('ticketThread');
+['wheel', 'touchmove', 'keydown', 'pointerdown'].forEach(name => threadEl.addEventListener(name, () => { lastReaderScroll = Date.now(); }, { passive: true }));
+threadEl.addEventListener('scroll', () => {
+  if (Date.now() - lastReaderScroll < 400) threadPinned = threadEl.scrollHeight - threadEl.scrollTop - threadEl.clientHeight < 40;
+});
+function renderTicketMessages(messages, firstRender, noteHtml = '') {
+  ticketMessages = messages;
+  closeMessageMenu();
+  const thread = document.getElementById('ticketThread');
+  const atBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 40;
+  thread.innerHTML = noteHtml + messages.map((m) => {
+    const mine = m.sender === 'support';
+    const device = !mine && m.device_label ? ` · ${escapeHtml(m.device_label)}` : '';
+    const deviceTitle = !mine && m.device_id ? ` title="Device ID: ${escapeHtml(m.device_id)}"` : '';
+    const quote = m.reply_to
+      ? `<div class="ticket-quote" data-quote="${Number(m.reply_to.id)}"><b>${messageWho(m.reply_to.sender)}</b><span class="ticket-quote-text">${escapeHtml(m.reply_to.snippet || 'Photo')}</span></div>`
+      : '';
+    const photos = (m.attachments || []).map(a => `<div class="ticket-photo-slot" data-support-photo="${Number(a.id)}">Loading photo…</div>`).join('');
+    const reactions = (m.reactions || []).length
+      ? `<div class="reaction-row">${m.reactions.map(r => {
+          const own = r.sender === 'support';
+          return `<button type="button" class="reaction-chip${own ? ' mine' : ''}" data-react="${Number(m.id)}" data-emoji="${escapeHtml(r.emoji)}" data-own="${own ? 1 : 0}" title="${own ? 'Your reaction - click to remove it' : 'The customer\'s reaction - click to react the same'}">${escapeHtml(r.emoji)}</button>`;
+        }).join('')}</div>`
+      : '';
+    return `<div class="chat-row ${mine ? 'support' : 'customer'}" data-row="${Number(m.id)}"><div class="ticket-msg ${mine ? 'support' : 'customer'}" data-msg="${Number(m.id)}"${deviceTitle}>${quote}<div class="ticket-msg-meta">${messageWho(m.sender)}${device} · ${escapeHtml(m.created_at)}</div>${m.body ? `<div class="ticket-body">${escapeHtml(m.body)}</div>` : ''}${photos}</div>${reactions}</div>`;
+  }).join('') || '<p class="section-sub">No messages yet.</p>';
+
+  thread.querySelectorAll('.ticket-msg[data-msg]').forEach(bubble => bubble.addEventListener('dblclick', (e) => {
+    window.getSelection()?.removeAllRanges();
+    e.preventDefault();
+    const m = ticketMessages.find(x => x.id === Number(bubble.dataset.msg));
+    if (m) openMessageMenu(m, bubble);
+  }));
+  thread.querySelectorAll('[data-quote]').forEach(q => q.addEventListener('click', () => {
+    const row = thread.querySelector(`[data-row="${Number(q.dataset.quote)}"]`);
+    if (!row) return;
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 1200);
+  }));
+  thread.querySelectorAll('[data-react]').forEach(chip => chip.addEventListener('click', () => {
+    reactToMessage(Number(chip.dataset.react), chip.dataset.own === '1' ? '' : chip.dataset.emoji);
+  }));
+  thread.querySelectorAll('[data-support-photo]').forEach(slot => showSupportPhoto(slot));
+  threadPinned = firstRender || atBottom;
+  if (threadPinned) thread.scrollTop = thread.scrollHeight;
 }
 
 async function openTicketThread(ticketId) {
@@ -973,6 +1268,8 @@ async function openTicketThread(ticketId) {
   const dialog = document.getElementById('ticketDialog');
   document.getElementById('ticketReplyText').value = '';
   clearTicketPhotos();
+  setReplyTarget(null);
+  closeMessageMenu();
   document.getElementById('ticketReplyMsg').className = 'msg err';
   if (typeof dialog.showModal === 'function') dialog.showModal();
   await refreshOpenTicketThread();
@@ -996,25 +1293,21 @@ async function refreshOpenTicketThread() {
     const { ticket, messages } = data;
     const signature = JSON.stringify([ticket, messages]);
     if (signature === ticketThreadSignature) return;
+    const firstRender = ticketThreadSignature === null;
     ticketThreadSignature = signature;
     document.getElementById('ticketDialogShop').textContent =
       (ticket.business_name || ('Shop #' + ticket.shop_id)) + ' · ' + (SUPPORT_STATUS_LABEL[ticket.status] || ticket.status);
     document.getElementById('ticketDialogSubject').textContent = ticket.subject;
-     const returnedPhotoCount = messages.reduce((count, message) => count + (message.attachments || []).length, 0);
-     const listedPhotoCount = Number(supportTickets.find(row => row.id === ticketId)?.attachment_count || 0);
-     document.getElementById('ticketThread').innerHTML = (listedPhotoCount > 0 && returnedPhotoCount === 0
-       ? '<p class="section-sub">This ticket has photos, but the support server did not return their details. Refresh the page; if they are still missing, check that the dashboard points to the current sync API.</p>'
-       : '') + messages.map((m) => `
-      <div class="ticket-msg ${m.sender === 'support' ? 'support' : 'customer'}">
-        <div class="ticket-msg-meta">${m.sender === 'support' ? 'You' : 'Customer'} · ${escapeHtml(m.created_at)}</div>
-        ${escapeHtml(m.body)}
-        <div>${(m.attachments || []).map(a => `<button type="button" data-support-photo="${Number(a.id)}">View photo</button>`).join('')}</div>
-      </div>
-    `).join('') || '<p class="section-sub">No messages yet.</p>';
-     document.querySelectorAll('[data-support-photo]').forEach(button => {
-       button.addEventListener('click', () => loadSupportPhoto(button));
-       loadSupportPhoto(button);
-     });
+    document.getElementById('ticketDialogDevice').textContent = ticket.opened_by_device_id
+      ? 'Opened from ' + (ticket.opened_by_device_label || 'a device') + ' · device ID ' + ticket.opened_by_device_id
+      : '';
+    // The ticket list says it has photos but the thread came back without any: the dashboard is
+    // pointed at a sync API that is too old to send them. Say so instead of showing nothing.
+    const returnedPhotoCount = messages.reduce((count, message) => count + (message.attachments || []).length, 0);
+    const listedPhotoCount = Number(supportTickets.find(row => row.id === ticketId)?.attachment_count || 0);
+    renderTicketMessages(messages, firstRender, listedPhotoCount > 0 && returnedPhotoCount === 0
+      ? '<p class="section-sub">This ticket has photos, but the support server did not return their details. Refresh the page; if they are still missing, check that the dashboard points to the current sync API.</p>'
+      : '');
     document.getElementById('ticketResolveBtn').disabled = ticket.status === 'closed';
     document.getElementById('ticketResolveBtn').textContent = ticket.status === 'closed' ? 'Resolved' : 'Mark resolved';
     // Update the row in the background list too, without waiting for the
@@ -1050,7 +1343,7 @@ async function sendTicketReply() {
     const res = await fetch(platformUrl + '?action=admin_support_reply', {
       method: 'POST',
       headers: { 'X-Admin-Secret': secret, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticket_id: openTicketId, message, attachments: ticketPhotos.map(photo => ({data: photo.data})) }),
+      body: JSON.stringify({ ticket_id: openTicketId, message, reply_to_id: replyTarget ? replyTarget.id : undefined, attachments: ticketPhotos.map(photo => ({data: photo.data})) }),
     });
     const data = await res.json();
     if (!data.success) {
@@ -1059,6 +1352,8 @@ async function sendTicketReply() {
     }
     document.getElementById('ticketReplyText').value = '';
     clearTicketPhotos();
+    setReplyTarget(null);
+    ticketThreadSignature = null; // draw it as a first render, which also scrolls to the newest message
     await refreshOpenTicketThread();
   } catch (e) {
     showMsg('ticketReplyMsg', 'Could not reach the server: ' + e);
@@ -1287,6 +1582,7 @@ async function revokeShop(shopId, name) {
 // refresh keeps trying to update a dialog nobody is looking at, and the
 // support count/list behind it stays stuck mid-read.
 document.getElementById('ticketDialog').addEventListener('close', () => {
+  closeMessageMenu();
   openTicketId = null;
   renderSupportTickets();
 });
