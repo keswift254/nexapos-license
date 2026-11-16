@@ -335,10 +335,10 @@
     <div class="grid-2">
       <div>
         <label for="publishIncludeLegacy">
-          <input type="checkbox" id="publishIncludeLegacy" style="width:auto;margin-right:8px" onchange="toggleLegacyPublish()">
+          <input type="checkbox" id="publishIncludeLegacy" style="width:auto;margin-right:8px" onchange="toggleLegacyPublish()" checked>
           Also publish the Windows 7/8 edition (its own installer)
         </label>
-        <div id="legacyPublishFields" hidden>
+        <div id="legacyPublishFields">
           <label for="publishWindowsLegacyUrl">Windows 7/8 setup EXE URL</label>
           <input id="publishWindowsLegacyUrl" onchange="hashPublishFile('windowsLegacy')" oninput="updatePublishButtonState()">
           <label for="publishWindowsLegacySha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
@@ -346,7 +346,7 @@
           <div class="progress-text" id="publishWindowsLegacyProgress"></div>
         </div>
       </div>
-      <div class="hint">Leave this unticked for a release with no Windows 7/8 build: those PCs are then simply not offered the update, instead of being sent the Windows 10 installer, which cannot start on them.</div>
+      <div class="hint">This starts ticked, because every release has a Windows 7/8 build. Untick it for a release with no Windows 7/8 build: those PCs are then simply not offered the update, instead of being sent the Windows 10 installer, which cannot start on them.</div>
     </div>
     <div class="grid-2">
       <div>
@@ -501,6 +501,10 @@ function setSuggestedDownloadUrls(version) {
     `${DOWNLOADS_HOST}/NexaPOS-Setup-${version}.exe`;
   document.getElementById('publishAndroidUrl').value =
     `${APK_HOST}/NexaPOS-${version}.apk`;
+  // The Windows 7/8 edition is ticked by default, so its address follows the version too (it used to be filled in only when the box was ticked by hand).
+  if (includeLegacy()) {
+    document.getElementById('publishWindowsLegacyUrl').value = suggestedLegacyUrl(version);
+  }
 }
 
 function suggestedLegacyUrl(version) {
