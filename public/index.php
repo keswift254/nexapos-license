@@ -1008,16 +1008,14 @@ function purchasesService(PDO $pdo, array $licenseConfig): Purchases
 }
 
 /**
- * The caller's address, for rate limiting only. Cloudflare fronts the host and
- * puts the real client address in CF-Connecting-IP; without it (direct access,
- * local testing) the socket's address is all there is.
+ * The caller's address, for rate limiting only: the socket's own address. No proxy
+ * fronts this host (it was Cloudflare on the old hosting; on NameCrane clients
+ * connect straight to it), so a CF-Connecting-IP or X-Forwarded-For header is just
+ * text the caller chose - trusting it let anyone get round every per-address limit
+ * by sending a different made-up address each time.
  */
 function callerIp(): string
 {
-    $forwarded = trim(headerValue('CF-Connecting-IP'));
-    if ($forwarded !== '' && filter_var($forwarded, FILTER_VALIDATE_IP) !== false) {
-        return $forwarded;
-    }
     return trim((string) ($_SERVER['REMOTE_ADDR'] ?? ''));
 }
 

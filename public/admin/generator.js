@@ -1,407 +1,3 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>NexaPOS Key Generator</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
-  integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk"
-  crossorigin="anonymous"></script>
-<style>
-  :root {
-    color-scheme: light dark;
-    --bg: #f2f3f8;
-    --bg-accent: radial-gradient(circle at 15% -10%, rgba(99,102,241,0.12), transparent 45%);
-    --card-bg: #ffffff;
-    --card-border: rgba(15, 23, 42, 0.06);
-    --text: #14162b;
-    --muted: #6b7280;
-    --field-bg: #ffffff;
-    --field-border: #dfe2ec;
-    --field-focus: #6366f1;
-    --accent: #4f46e5;
-    --accent-hover: #4338ca;
-    --accent-soft: #eef2ff;
-    --danger: #dc2626;
-    --danger-hover: #b91c1c;
-    --danger-soft: #fee2e2;
-    --success-soft: #dcfce7;
-    --success-text: #166534;
-    --err-soft: #fee2e2;
-    --err-text: #991b1b;
-    --warn-soft: #fef3c7;
-    --warn-text: #92400e;
-    --shadow: 0 1px 2px rgba(15,23,42,0.04), 0 10px 24px -12px rgba(15,23,42,0.12);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0b0c14;
-      --bg-accent: radial-gradient(circle at 15% -10%, rgba(99,102,241,0.18), transparent 45%);
-      --card-bg: #161826;
-      --card-border: rgba(255,255,255,0.06);
-      --text: #eef0fb;
-      --muted: #9aa0b4;
-      --field-bg: #1e2133;
-      --field-border: #2c3049;
-      --field-focus: #818cf8;
-      --accent: #6366f1;
-      --accent-hover: #818cf8;
-      --accent-soft: rgba(99,102,241,0.16);
-      --danger: #f87171;
-      --danger-hover: #fca5a5;
-      --danger-soft: rgba(248,113,113,0.16);
-      --success-soft: rgba(34,197,94,0.16);
-      --success-text: #86efac;
-      --err-soft: rgba(248,113,113,0.16);
-      --err-text: #fca5a5;
-      --warn-soft: rgba(245,158,11,0.16);
-      --warn-text: #fcd34d;
-      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 10px 24px -12px rgba(0,0,0,0.5);
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-    max-width: 680px;
-    margin: 0 auto;
-    padding: 36px 20px 60px;
-    background: var(--bg) var(--bg-accent);
-    background-attachment: fixed;
-    color: var(--text);
-    -webkit-font-smoothing: antialiased;
-  }
-  .page-head { margin-bottom: 24px; }
-  h1 {
-    font-size: 22px;
-    font-weight: 700;
-    margin: 0 0 6px;
-    letter-spacing: -0.01em;
-  }
-  p.sub { color: var(--muted); font-size: 13.5px; line-height: 1.5; margin: 0; }
-  .card {
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    border-radius: 16px;
-    padding: 22px;
-    margin-bottom: 18px;
-    box-shadow: var(--shadow);
-  }
-  .card-title {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    font-size: 14.5px;
-    font-weight: 700;
-    margin: 0 0 14px;
-  }
-  .card-title .emoji { font-size: 16px; line-height: 1; }
-  .card-title .hint {
-    font-weight: 500;
-    color: var(--muted);
-    font-size: 12px;
-    margin-left: auto;
-    text-align: right;
-  }
-  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
-  select, input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 11px 12px;
-    border: 1px solid var(--field-border);
-    border-radius: 10px;
-    font-size: 14px;
-    margin-bottom: 14px;
-    background: var(--field-bg);
-    color: var(--text);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
-    font-family: inherit;
-  }
-  select:focus, input:focus {
-    outline: none;
-    border-color: var(--field-focus);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--field-focus) 22%, transparent);
-  }
-  input::placeholder { color: #9aa0b4; }
-  input:read-only {
-    background: color-mix(in srgb, var(--field-bg) 60%, var(--muted) 10%);
-    color: var(--muted);
-  }
-  button {
-    width: 100%;
-    padding: 12px;
-    border: none;
-    border-radius: 10px;
-    background: var(--accent);
-    color: #fff;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s ease, transform 0.05s ease;
-  }
-  button:hover:not(:disabled) { background: var(--accent-hover); }
-  button:active:not(:disabled) { transform: translateY(1px); }
-  button:disabled { opacity: 0.45; cursor: default; }
-  button.danger { background: var(--danger); }
-  button.danger:hover:not(:disabled) { background: var(--danger-hover); }
-  button.secondary { background: var(--accent-soft); color: var(--accent); }
-  button.secondary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent-soft) 70%, var(--accent) 15%); }
-  .result {
-    text-align: center;
-    padding: 18px;
-    margin-top: 14px;
-    border-radius: 12px;
-    background: var(--accent-soft);
-    display: none;
-  }
-  .result.show { display: block; }
-  .code {
-    font-size: 28px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    font-family: "SF Mono", Consolas, monospace;
-    color: var(--accent);
-  }
-  .timer { font-size: 13px; color: var(--muted); margin-top: 4px; }
-  .msg { font-size: 13px; margin-top: 10px; padding: 11px 12px; border-radius: 10px; display: none; line-height: 1.4; }
-  .msg.show { display: block; }
-  .msg.ok { background: var(--success-soft); color: var(--success-text); }
-  .msg.err { background: var(--err-soft); color: var(--err-text); }
-  .divider-space { height: 10px; }
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
-  @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
-  .progress-text { font-size: 12px; color: var(--muted); margin: -8px 0 14px; min-height: 15px; }
-  .list-title { font-size: 11.5px; font-weight: 700; color: var(--muted); margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; }
-  .list { display: grid; gap: 8px; }
-  .item { border: 1px solid var(--field-border); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5; }
-  .item .top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
-  .item .mono { font-family: "SF Mono", Consolas, monospace; font-weight: 700; word-break: break-all; }
-  .item .dim { color: var(--muted); word-break: break-word; }
-  .chip { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
-  .chip.ok { background: var(--success-soft); color: var(--success-text); }
-  .chip.warn { background: var(--warn-soft); color: var(--warn-text); }
-  .chip.bad { background: var(--err-soft); color: var(--err-text); }
-  .chip.mute { background: var(--accent-soft); color: var(--accent); }
-  button.small { width: auto; padding: 5px 12px; font-size: 12px; border-radius: 8px; }
-  .empty { color: var(--muted); font-size: 12.5px; }
-</style>
-</head>
-<body>
-  <div class="page-head">
-    <h1>NexaPOS Key Generator</h1>
-    <p class="sub">Run this after a customer pays. The code is redeemable for a limited window and locks to whichever device activates it first.</p>
-  </div>
-
-  <div class="card">
-    <label for="serverUrl">License server address</label>
-    <input id="serverUrl" value="http://localhost/nexapos_license/public/index.php">
-    <label for="adminSecret">Admin secret</label>
-    <input id="adminSecret" type="password" placeholder="paste your admin_secret here">
-    <label for="expiryPreset">Activation window</label>
-    <select id="expiryPreset" onchange="onExpiryPresetChange()">
-      <option value="30">30 minutes (default)</option>
-      <option value="60">1 hour</option>
-      <option value="360">6 hours</option>
-      <option value="1440">24 hours</option>
-      <option value="4320">3 days</option>
-      <option value="10080">7 days (max)</option>
-      <option value="custom">Custom...</option>
-    </select>
-    <input id="expiryCustom" type="number" min="1" max="10080" placeholder="Minutes (1-10080)" style="display:none">
-    <label for="durationPreset">Expires after (license validity, not the activation window above)</label>
-    <select id="durationPreset" onchange="onDurationPresetChange()">
-      <option value="">Never expires (default)</option>
-      <option value="7">7 days</option>
-      <option value="30">30 days</option>
-      <option value="90">90 days</option>
-      <option value="180">180 days</option>
-      <option value="365">365 days</option>
-      <option value="custom">Custom...</option>
-    </select>
-    <input id="durationCustom" type="number" min="1" placeholder="Days" style="display:none">
-    <div class="card-title" style="margin:0 0 10px"><span class="emoji">🔑</span> Generate a license key</div>
-    <button id="generateBtn" onclick="generateKey()">Generate key</button>
-    <div class="result" id="result">
-      <div class="code" id="codeText"></div>
-      <div class="timer" id="timerText"></div>
-      <div class="timer" id="durationText"></div>
-    </div>
-    <div class="msg" id="generateMsg"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title"><span class="emoji">🚫</span> Revoke a key</div>
-    <label for="revokeCode">Code to revoke (e.g. after a refund)</label>
-    <input id="revokeCode" placeholder="the code to revoke">
-    <button class="danger" onclick="revokeKey()">Revoke</button>
-    <div class="msg" id="revokeMsg"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title"><span class="emoji">♻️</span> Unrevoke a license</div>
-    <label for="unrevokeDevice">Device ID of the revoked device</label>
-    <input id="unrevokeDevice" placeholder="Device ID from the device's own screen, or the dashboard">
-    <button onclick="unrevokeLicense()">Unrevoke</button>
-    <div class="hint" style="margin-top:10px">Reinstates that device's revoked license and re-enables its sync access. If the device is showing the activation screen afterwards, it enters its license key again. Safe to run twice - use that to retry if the platform step timed out.</div>
-    <div class="msg" id="unrevokeMsg"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title"><span class="emoji">⏳</span> Extend a license</div>
-    <label for="extendCode">Activated code (renewal payment on an already-activated key)</label>
-    <input id="extendCode" placeholder="the activated code to extend">
-    <label for="extendDays">Days to add</label>
-    <input id="extendDays" type="number" min="1" placeholder="e.g. 30">
-    <button onclick="extendLicense()">Extend</button>
-    <div class="msg" id="extendMsg"></div>
-  </div>
-
-  <div class="card" id="setExpiryCard">
-    <div class="card-title"><span class="emoji">📅</span> Change a license expiry date</div>
-    <label for="setExpiryCode">Activated license code</label>
-    <input id="setExpiryCode" placeholder="the activated code to correct">
-    <label for="setExpiryDate">New expiry date and time (your local time)</label>
-    <input id="setExpiryDate" type="datetime-local">
-    <button id="setExpiryBtn" onclick="setLicenseExpiry()">Change expiry date</button>
-    <div class="hint" style="margin-top:10px">This replaces the current end date exactly and can shorten or extend access. For a normal renewal, use Extend a license above.</div>
-    <div class="msg" id="setExpiryMsg"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title"><span class="emoji">🔎</span> Find a customer <span class="hint">reinstalled? start here</span></div>
-    <label for="findQuery">Email they paid with, their device ID, or a license code</label>
-    <input id="findQuery" placeholder="e.g. mary@example.com" onkeydown="if (event.key === 'Enter') findCustomer()">
-    <button id="findBtn" onclick="findCustomer()">Find</button>
-    <div class="msg" id="findMsg"></div>
-    <div id="findResult"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title"><span class="emoji">📲</span> Move a license to a new device</div>
-    <label for="moveFrom">License code, or the device ID it is on now</label>
-    <input id="moveFrom" placeholder="the license code (or the old device ID)">
-    <label for="moveTo">New device ID (the customer reads it off their activation screen)</label>
-    <input id="moveTo" placeholder="the new device ID">
-    <button id="moveBtn" onclick="moveLicense()">Move license</button>
-    <div class="hint" style="margin-top:10px">Keeps the end date. Everything the old device held moves with it, and the old device stops being licensed the next time it checks in. Afterwards the customer opens NexaPOS on the new device and enters their key (or taps Restore). This does not bring back their shop data - that comes from a backup.</div>
-    <div class="msg" id="moveMsg"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title"><span class="emoji">💳</span> Purchases <span class="hint">paid in the app</span></div>
-    <button id="purchasesBtn" class="secondary" onclick="loadPurchases()">Show recent purchases</button>
-    <div class="msg" id="purchasesMsg"></div>
-    <div id="purchasesResult"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title"><span class="emoji">🏷️</span> Plans &amp; prices <span class="hint">what customers can buy in the app</span></div>
-    <button id="plansBtn" class="secondary" onclick="loadPlans()">Show the plans</button>
-    <div class="hint" style="margin-top:10px">Change a price or how long a plan lasts, put a plan on or off sale, add one, or remove one. New payments use the change at once; somebody who is already paying keeps the price and length they started with. A "test plan" is the temporary token-price plan for trying a real payment.</div>
-    <div class="msg" id="plansMsg"></div>
-    <div id="plansList"></div>
-    <div id="planAdd" hidden>
-      <div class="list-title">Add a plan</div>
-      <div class="item" id="planAddRow"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-title"><span class="emoji">🚀</span> Publish app update <span class="hint">run once per real release</span></div>
-    <div class="grid-2">
-      <div>
-        <label for="publishVersion">Version</label>
-        <input id="publishVersion" placeholder="Loading current version...">
-      </div>
-      <div>
-        <label for="publishNotes">Release notes (short summary shown to users)</label>
-        <input id="publishNotes" placeholder="e.g. Safer shop switching, POS migration, and cashier updates">
-      </div>
-    </div>
-    <div class="grid-2">
-      <div>
-        <label for="publishWindowsInstallerUrl">Windows setup EXE URL</label>
-        <input id="publishWindowsInstallerUrl" onchange="hashPublishFile('windowsInstaller')" oninput="updatePublishButtonState()">
-        <label for="publishWindowsInstallerSha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
-        <input id="publishWindowsInstallerSha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
-        <div class="progress-text" id="publishWindowsInstallerProgress"></div>
-      </div>
-      <div>
-        <label for="publishAndroidUrl">Android download URL</label>
-        <input id="publishAndroidUrl" onchange="hashPublishFile('android')" oninput="updatePublishButtonState()">
-        <label for="publishAndroidSha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
-        <input id="publishAndroidSha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
-        <div class="progress-text" id="publishAndroidProgress"></div>
-      </div>
-    </div>
-    <div class="grid-2">
-      <div>
-        <label for="publishIncludeLegacy">
-          <input type="checkbox" id="publishIncludeLegacy" style="width:auto;margin-right:8px" onchange="toggleLegacyPublish()" checked>
-          Also publish the Windows 7/8 edition (its own installer)
-        </label>
-        <div id="legacyPublishFields">
-          <label for="publishWindowsLegacyUrl">Windows 7/8 setup EXE URL</label>
-          <input id="publishWindowsLegacyUrl" onchange="hashPublishFile('windowsLegacy')" oninput="updatePublishButtonState()">
-          <label for="publishWindowsLegacySha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
-          <input id="publishWindowsLegacySha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
-          <div class="progress-text" id="publishWindowsLegacyProgress"></div>
-        </div>
-      </div>
-      <div class="hint">This starts ticked, because every release has a Windows 7/8 build. Untick it for a release with no Windows 7/8 build: those PCs are then simply not offered the update, instead of being sent the Windows 10 installer, which cannot start on them.</div>
-    </div>
-    <div class="grid-2">
-      <div>
-        <label for="publishIncludePatches">
-          <input type="checkbox" id="publishIncludePatches" style="width:auto;margin-right:8px" onchange="togglePatchPublish()">
-          Also publish delta/incremental patches (advanced)
-        </label>
-        <div id="patchPublishFields" hidden>
-          <label for="publishPatchFromVersion">Patch built FROM version (only devices already on exactly this version can use it)</label>
-          <input id="publishPatchFromVersion" placeholder="e.g. 1.0.45" oninput="updatePublishButtonState()">
-
-          <label for="publishAndroidPatchUrl">Android patch (.nxpatch) URL - optional</label>
-          <input id="publishAndroidPatchUrl" onchange="hashPublishFile('androidPatch')" oninput="updatePublishButtonState()">
-          <label for="publishAndroidPatchSha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
-          <input id="publishAndroidPatchSha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
-          <div class="progress-text" id="publishAndroidPatchProgress"></div>
-
-          <label for="publishWindowsInstallerPatchUrl">Windows 10/11 patch bundle (.nxbundle) URL - optional</label>
-          <input id="publishWindowsInstallerPatchUrl" onchange="hashPublishFile('windowsInstallerPatch')" oninput="updatePublishButtonState()">
-          <label for="publishWindowsInstallerPatchSha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
-          <input id="publishWindowsInstallerPatchSha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
-          <div class="progress-text" id="publishWindowsInstallerPatchProgress"></div>
-
-          <label for="publishWindowsLegacyPatchUrl">Windows 7/8 patch bundle (.nxbundle) URL - optional, only used if the Windows 7/8 edition above is also ticked</label>
-          <input id="publishWindowsLegacyPatchUrl" onchange="hashPublishFile('windowsLegacyPatch')" oninput="updatePublishButtonState()">
-          <label for="publishWindowsLegacyPatchSha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
-          <input id="publishWindowsLegacyPatchSha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
-          <div class="progress-text" id="publishWindowsLegacyPatchProgress"></div>
-
-          <label for="publishPatchApplierUrl">Windows patch applier (NexaPosPatchApply.exe) URL - only needed if either Windows patch bundle above is filled in; stable across releases, usually unchanged</label>
-          <input id="publishPatchApplierUrl" onchange="hashPublishFile('patchApplier')" oninput="updatePublishButtonState()">
-          <label for="publishPatchApplierSha256">SHA-256 (paste it, or use Fetch &amp; verify below)</label>
-          <input id="publishPatchApplierSha256" placeholder="Paste a SHA-256, or click Fetch & verify files" oninput="updatePublishButtonState()">
-          <div class="progress-text" id="publishPatchApplierProgress"></div>
-        </div>
-      </div>
-      <div class="hint">A device already on the "built FROM" version downloads a small binary patch instead of the full install - falls back to the normal full download automatically if anything doesn't check out. Leave everything here blank for a normal release; nothing here is ever required.</div>
-    </div>
-    <button class="secondary" onclick="hashBothPublishFiles()" id="hashFilesBtn">Fetch &amp; verify files</button>
-    <div class="msg" id="hashMsg"></div>
-    <div class="divider-space"></div>
-    <button onclick="publishVersion()" id="publishBtn" disabled>Publish update</button>
-    <div class="msg" id="publishMsg"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-title"><span class="emoji">🛠️</span> Support recovery</div>
-    <label for="recoveryDevice">Device ID</label>
-    <input id="recoveryDevice" placeholder="Device ID from the client's login or authenticator screen">
-    <button onclick="supportRecovery('reset_authenticator')">Reset authenticator</button>
-    <button class="secondary" onclick="supportRecovery('issue_support_access')" style="margin-top:10px">Generate super admin recovery password</button>
-    <div class="msg" id="recoveryMsg"></div>
-    <input id="recoveryPassword" readonly aria-label="One-time support password" hidden>
-  </div>
-<script>
 async function supportRecovery(action) {
   const deviceId = document.getElementById('recoveryDevice').value.trim();
   if (!deviceId) return showMsg('recoveryMsg', 'Enter the device ID.', false);
@@ -1611,6 +1207,49 @@ async function publishVersion() {
     updatePublishButtonState();
   }
 }
-</script>
-</body>
-</html>
+
+// Buttons and fields are wired here, not with onclick="..." in the page, so the page can run under a
+// Content-Security-Policy that refuses inline script (see public/.htaccess).
+(function wireControls() {
+  function on(id, type, handler) { document.getElementById(id).addEventListener(type, handler); }
+  on('expiryPreset', 'change', function (event) { onExpiryPresetChange(); });
+  on('durationPreset', 'change', function (event) { onDurationPresetChange(); });
+  on('generateBtn', 'click', function (event) { generateKey(); });
+  on('revokeBtn', 'click', function (event) { revokeKey(); });
+  on('unrevokeBtn', 'click', function (event) { unrevokeLicense(); });
+  on('extendBtn', 'click', function (event) { extendLicense(); });
+  on('setExpiryBtn', 'click', function (event) { setLicenseExpiry(); });
+  on('findQuery', 'keydown', function (event) { if (event.key === 'Enter') findCustomer(); });
+  on('findBtn', 'click', function (event) { findCustomer(); });
+  on('moveBtn', 'click', function (event) { moveLicense(); });
+  on('purchasesBtn', 'click', function (event) { loadPurchases(); });
+  on('plansBtn', 'click', function (event) { loadPlans(); });
+  on('publishWindowsInstallerUrl', 'change', function (event) { hashPublishFile('windowsInstaller'); });
+  on('publishWindowsInstallerUrl', 'input', function (event) { updatePublishButtonState(); });
+  on('publishWindowsInstallerSha256', 'input', function (event) { updatePublishButtonState(); });
+  on('publishAndroidUrl', 'change', function (event) { hashPublishFile('android'); });
+  on('publishAndroidUrl', 'input', function (event) { updatePublishButtonState(); });
+  on('publishAndroidSha256', 'input', function (event) { updatePublishButtonState(); });
+  on('publishIncludeLegacy', 'change', function (event) { toggleLegacyPublish(); });
+  on('publishWindowsLegacyUrl', 'change', function (event) { hashPublishFile('windowsLegacy'); });
+  on('publishWindowsLegacyUrl', 'input', function (event) { updatePublishButtonState(); });
+  on('publishWindowsLegacySha256', 'input', function (event) { updatePublishButtonState(); });
+  on('publishIncludePatches', 'change', function (event) { togglePatchPublish(); });
+  on('publishPatchFromVersion', 'input', function (event) { updatePublishButtonState(); });
+  on('publishAndroidPatchUrl', 'change', function (event) { hashPublishFile('androidPatch'); });
+  on('publishAndroidPatchUrl', 'input', function (event) { updatePublishButtonState(); });
+  on('publishAndroidPatchSha256', 'input', function (event) { updatePublishButtonState(); });
+  on('publishWindowsInstallerPatchUrl', 'change', function (event) { hashPublishFile('windowsInstallerPatch'); });
+  on('publishWindowsInstallerPatchUrl', 'input', function (event) { updatePublishButtonState(); });
+  on('publishWindowsInstallerPatchSha256', 'input', function (event) { updatePublishButtonState(); });
+  on('publishWindowsLegacyPatchUrl', 'change', function (event) { hashPublishFile('windowsLegacyPatch'); });
+  on('publishWindowsLegacyPatchUrl', 'input', function (event) { updatePublishButtonState(); });
+  on('publishWindowsLegacyPatchSha256', 'input', function (event) { updatePublishButtonState(); });
+  on('publishPatchApplierUrl', 'change', function (event) { hashPublishFile('patchApplier'); });
+  on('publishPatchApplierUrl', 'input', function (event) { updatePublishButtonState(); });
+  on('publishPatchApplierSha256', 'input', function (event) { updatePublishButtonState(); });
+  on('hashFilesBtn', 'click', function (event) { hashBothPublishFiles(); });
+  on('publishBtn', 'click', function (event) { publishVersion(); });
+  on('resetAuthenticatorBtn', 'click', function (event) { supportRecovery('reset_authenticator'); });
+  on('supportAccessBtn', 'click', function (event) { supportRecovery('issue_support_access'); });
+})();

@@ -1,0 +1,27 @@
+Options -Indexes
+DirectoryIndex index.php index.html
+
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# The admin pages live in /admin/, which is password-protected in DirectAdmin (a second lock in front of the admin
+# secret). Old bookmarks still land on them.
+Redirect 301 /dashboard.html /admin/dashboard.html
+Redirect 301 /generator.html /admin/generator.html
+
+<IfModule mod_headers.c>
+    Header always set Strict-Transport-Security "max-age=31536000"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always unset X-Powered-By
+    Header unset X-Powered-By
+
+    # The admin pages hold the admin secret. Only their own script files may run (no inline script, no
+    # onclick="..."), they may only talk to NexaPOS's own servers and download hosts, and no other site may frame them.
+    <FilesMatch "^(dashboard|generator)\.html$">
+        Header always set Content-Security-Policy "default-src 'none'; script-src 'self' https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; connect-src 'self' https://license.nexapos.cc https://sync.nexapos.cc https://pub-2a7877d5b6bf40a18da4c1d6ed977081.r2.dev https://nexapos-downloads.condojuniur.workers.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        Header always set X-Frame-Options "DENY"
+        Header always set Referrer-Policy "no-referrer"
+        Header always set Cache-Control "no-store"
+    </FilesMatch>
+</IfModule>
